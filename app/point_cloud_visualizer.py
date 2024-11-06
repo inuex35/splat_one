@@ -1,9 +1,12 @@
 import numpy as np
-from PyQt5.QtWidgets import QWidget, QGridLayout
+from PyQt5.QtWidgets import QWidget, QGridLayout, QSplitter, QListWidget, QVBoxLayout, QApplication, QMenu
+from PyQt5.QtCore import Qt, QPoint
+from PyQt5.QtGui import QVector3D, QMatrix4x4  # 必要なモジュールのインポート
 import pyqtgraph.opengl as gl
 import pyqtgraph as pg
 from utils.logger import setup_logger
 import json
+import sys
 
 # ログの設定
 logger = setup_logger()
@@ -55,6 +58,8 @@ class PointCloudVisualizer(QWidget):
         self.viewer.setCameraPosition(distance=50)
         self.layout.addWidget(self.viewer, 0, 0, 1, 1)
 
+        self.camera_items = []
+        
         # 初期表示の更新
         self.update_visualization()
 
@@ -92,7 +97,7 @@ class PointCloudVisualizer(QWidget):
                 t = np.array(shot.get("translation", [0, 0, 0]))
                 t_rot = t[[0, 2, 1]] * np.array([-1, -1, 1])
                 cam_type = reconstruction["cameras"][shot["camera"]]["projection_type"]
-                cameras.append((R, t_rot, cam_type))
+                cameras.append((shot_name, R, t_rot, cam_type))
 
         # ポイントクラウドの表示
         scatter = gl.GLScatterPlotItem(pos=points, color=colors, size=2)
@@ -100,41 +105,98 @@ class PointCloudVisualizer(QWidget):
         self.viewer.addItem(scatter)
 
         # カメラの可視化
-        for R, t, cam_model in cameras:
-            self.add_camera_visualization(R, t, cam_model)
+        for shot_name, R, t, cam_model in cameras:
+            self.add_camera_visualization(shot_name, R, t, cam_model)
 
-    def add_camera_visualization(self, R, t, cam_model, size=1):
-        """カメラの位置と方向を可視化"""
-        try:
-            if cam_model in ["spherical", "equirectangular"]:
-                # 球状のカメラモデルの可視化
-                sphere_meshdata = pg.opengl.MeshData.sphere(rows=10, cols=20, radius=size)
-                sphere = gl.GLMeshItem(meshdata=sphere_meshdata, color=(1, 1, 1, 0.3), smooth=True, shader='balloon')
-                sphere.setGLOptions('translucent')
-                sphere.translate(t[0], t[1], t[2])
-                self.viewer.addItem(sphere)
+    def add_camera_visualization(self, cam_name, R, t, cam_model, size=1):
+        """カメラの位置と方向を可視化し、リストに保持"""
+        if cam_model in ["spherical", "equirectangular"]:
+            # 球状のカメラモデルの可視化
+            sphere_meshdata = pg.opengl.MeshData.sphere(rows=10, cols=20, radius=size)
+            sphere = gl.GLMeshItem(meshdata=sphere_meshdata, color=(1, 1, 1, 0.3), smooth=True, shader='balloon')
+            sphere.setGLOptions('translucent')
+            sphere.translate(t[0], t[1], t[2])
+            self.viewer.addItem(sphere)
+            self.camera_items.append((cam_name, sphere, t, R))
+
+    def highlight_camera(self, cam_name, highlight_color=(1, 0, 0, 0.8)):
+        """指定されたカメラをハイライト"""
+        for name, sphere, _, _ in self.camera_items:
+            if name == cam_name:
+                sphere.setColor(highlight_color)
             else:
-                # 角柱カメラモデルの可視化
-                corners = np.array([
-                    [size, size, 0],
-                    [size, -size, 0],
-                    [-size, -size, 0],
-                    [-size, size, 0],
-                    [0, 0, -size * 2]
-                ])
-                corners = (R @ corners.T).T + t
-                lines = np.array([
-                    [corners[0], corners[1]],
-                    [corners[1], corners[2]],
-                    [corners[2], corners[3]],
-                    [corners[3], corners[0]],
-                    [corners[0], corners[4]],
-                    [corners[1], corners[4]],
-                    [corners[2], corners[4]],
-                    [corners[3], corners[4]]
-                ])
-                for line in lines:
-                    line_item = gl.GLLinePlotItem(pos=line, color=(0, 0, 1, 1), width=1)
-                    self.viewer.addItem(line_item)
-        except Exception as e:
-            logger.error(f"Error while drawing camera visualization: {e}")
+                sphere.setColor((1, 1, 1, 0.3))  # デフォルトカラーに戻す
+
+    def move_to_camera(self, cam_name):
+        """指定されたカメラの位置と回転に視点を移動"""
+        for name, _, position, rotation_matrix in self.camera_items:
+            if name == cam_name:
+                # カメラ位置を新しい視点位置として設定
+                self.viewer.setCameraPosition(pos=QVector3D(position[0], position[1], position[2]), distance=10)
+                
+                # 回転行列から視点のピッチとヨーを計算
+                yaw = np.arctan2(rotation_matrix[1, 0], rotation_matrix[0, 0])
+                pitch = np.arcsin(-rotation_matrix[2, 0])
+                
+                # 視点の回転を設定
+                self.viewer.setCameraPosition(elevation=np.degrees(pitch), azimuth=np.degrees(yaw))
+                break
+
+class MainWindow(QWidget):
+    def __init__(self, file_path):
+        super().__init__()
+        self.setWindowTitle("SAM2 Application")
+        self.setGeometry(100, 100, 1200, 800)
+        
+        # スプリッターの作成
+        splitter = QSplitter(Qt.Horizontal)
+        
+        # 左側: 画像リスト
+        self.image_list = QListWidget()
+        self.image_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.image_list.customContextMenuRequested.connect(self.open_context_menu)
+        self.image_list.itemClicked.connect(self.on_image_click)
+        
+        # ポイントクラウドビジュアライザーのインスタンス作成
+        self.pointcloud_viewer = PointCloudVisualizer(file_path)
+
+        # レイアウトの設定
+        splitter.addWidget(self.image_list)
+        splitter.addWidget(self.pointcloud_viewer)
+        splitter.setSizes([200, 800])
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(splitter)
+
+        # カメラ名リストの設定
+        camera_names = [name for name, _, _, _ in self.pointcloud_viewer.camera_items]
+        self.populate_image_list(camera_names)
+
+    def populate_image_list(self, camera_names):
+        """画像リストをカメラ名で埋める"""
+        self.image_list.clear()
+        for name in camera_names:
+            self.image_list.addItem(name)
+
+    def open_context_menu(self, position: QPoint):
+        """右クリックでコンテキストメニューを表示し、選択したカメラ位置に移動"""
+        item = self.image_list.itemAt(position)
+        if item:
+            camera_name = item.text()
+            menu = QMenu()
+            move_action = menu.addAction("move to camera position")
+            action = menu.exec_(self.image_list.mapToGlobal(position))
+            if action == move_action:
+                self.pointcloud_viewer.move_to_camera(camera_name)
+
+    def on_image_click(self, item):
+        """画像リストの項目がクリックされたときに対応するカメラをハイライト"""
+        camera_name = item.text()
+        self.pointcloud_viewer.highlight_camera(camera_name)
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    file_path = "path/to/your/reconstruction.json"  # JSONファイルのパスを設定
+    window = MainWindow(file_path)
+    window.show()
+    sys.exit(app.exec_())

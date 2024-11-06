@@ -2,7 +2,7 @@
 import os
 from PyQt5.QtWidgets import QMainWindow, QToolBar, QAction, QFileDialog, QWidget, QVBoxLayout
 from app.mask_manager import MaskManager
-from app.point_cloud_visualizer import PointCloudVisualizer
+from app.point_cloud_visualizer import MainWindow, PointCloudVisualizer
 
 class MainApp(QMainWindow):
     def __init__(self):
@@ -21,8 +21,8 @@ class MainApp(QMainWindow):
 
         # Initialize MaskManager and Visualizer
         self.mask_manager = None
-        self.visualizer = PointCloudVisualizer("reconstruction.json")
-        
+        self.visualizer = MainWindow("reconstruction.json")
+
         # Layout for main content
         layout = QVBoxLayout()
         layout.addWidget(self.visualizer)
