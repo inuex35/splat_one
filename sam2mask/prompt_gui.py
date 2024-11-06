@@ -29,15 +29,16 @@ class PromptGUI:
         self.predictor.set_image(image)
 
         # SAM2でマスク生成
+        print(point_coords)
         with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
             masks, scores, logits = self.predictor.predict(
                 point_coords=point_coords,
                 point_labels=point_labels,
-                multimask_output=True
+                multimask_output=False
             )
 
-        # マスクを保存
-        mask_output_path = os.path.join(mask_dir, f"mask_{image_name}")
-        cv2.imwrite(mask_output_path, masks[0] * 255)
-        guru.info(f"Mask saved to {mask_output_path}")
-        return masks
+            # マスクを保存
+            mask_output_path = os.path.join(mask_dir, f"mask_{image_name}")
+            guru.info(f"Mask saved to {mask_output_path}")
+            inverted_mask = 1 - masks[0]
+            return inverted_mask * 255
