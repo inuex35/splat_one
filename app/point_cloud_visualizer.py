@@ -1,5 +1,5 @@
 import numpy as np
-from PyQt5.QtWidgets import QWidget, QGridLayout, QSplitter, QListWidget, QVBoxLayout, QApplication, QMenu
+from PyQt5.QtWidgets import QWidget, QGridLayout, QSplitter, QListWidget, QVBoxLayout, QApplication, QMenu, QTreeWidget, QTreeWidgetItem
 from PyQt5.QtCore import Qt, QPoint
 from PyQt5.QtGui import QVector3D, QMatrix4x4  # 必要なモジュールのインポート
 import pyqtgraph.opengl as gl
@@ -7,28 +7,14 @@ import pyqtgraph as pg
 from utils.logger import setup_logger
 import json
 import sys
+from scipy.spatial.transform import Rotation
 
 # ログの設定
 logger = setup_logger()
 
-def rpy_to_rotmat(roll: float, pitch: float, yaw: float) -> np.ndarray:
-    """Roll, pitch, yaw を回転行列に変換する関数"""
-    Rx = np.array([
-        [1, 0, 0],
-        [0, np.cos(roll), -np.sin(roll)],
-        [0, np.sin(roll),  np.cos(roll)]
-    ])
-    Ry = np.array([
-        [np.cos(pitch), 0, np.sin(pitch)],
-        [0, 1, 0],
-        [-np.sin(pitch), 0, np.cos(pitch)]
-    ])
-    Rz = np.array([
-        [np.cos(yaw), -np.sin(yaw), 0],
-        [np.sin(yaw),  np.cos(yaw), 0],
-        [0, 0, 1]
-    ])
-    return Rz @ Ry @ Rx
+def rotation_vector_to_euler(rotation_vector):
+    rotation_matrix = Rotation.from_rotvec(rotation_vector).as_matrix()
+    return rotation_matrix
 
 def load_reconstruction(file_path: str):
     """JSONファイルから再構築データをロードする関数"""
@@ -91,13 +77,24 @@ class PointCloudVisualizer(QWidget):
 
             # カメラデータの設定
             for shot_name, shot in reconstruction["shots"].items():
-                rotation = shot.get("rotation", [0, 0, 0])
-                roll, pitch, yaw = rotation
-                R = rpy_to_rotmat(roll, pitch, yaw)
-                t = np.array(shot.get("translation", [0, 0, 0]))
-                t_rot = t[[0, 2, 1]] * np.array([-1, -1, 1])
-                cam_type = reconstruction["cameras"][shot["camera"]]["projection_type"]
-                cameras.append((shot_name, R, t_rot, cam_type))
+                try:
+                    # Get the axis-angle rotation vector
+                    axis_angle = np.array(shot.get("rotation", [0, 0, 0]), dtype=np.float64)
+                    # Convert axis-angle to rotation matrix
+                    rotation = Rotation.from_rotvec(axis_angle).as_matrix()
+
+                    # Get the translation vector
+                    translation = np.array(shot.get("translation", [0, 0, 0]), dtype=np.float64)
+
+                    # Compute the camera position in world coordinates
+                    position = -rotation.T @ translation
+
+                    # Camera type
+                    cam_type = reconstruction["cameras"][shot["camera"]]["projection_type"]
+                    cameras.append((shot_name, rotation, position, cam_type))
+                except Exception as e:
+                    logger.error(f"Error processing shot '{shot_name}': {e}")
+                    continue
 
         # ポイントクラウドの表示
         scatter = gl.GLScatterPlotItem(pos=points, color=colors, size=2)
@@ -109,90 +106,160 @@ class PointCloudVisualizer(QWidget):
             self.add_camera_visualization(shot_name, R, t, cam_model)
 
     def add_camera_visualization(self, cam_name, R, t, cam_model, size=1):
-        """カメラの位置と方向を可視化し、リストに保持"""
+        """Visualize camera position and orientation, store in a list."""
         if cam_model in ["spherical", "equirectangular"]:
-            # 球状のカメラモデルの可視化
+            # Visualization for spherical camera models
             sphere_meshdata = pg.opengl.MeshData.sphere(rows=10, cols=20, radius=size)
             sphere = gl.GLMeshItem(meshdata=sphere_meshdata, color=(1, 1, 1, 0.3), smooth=True, shader='balloon')
             sphere.setGLOptions('translucent')
             sphere.translate(t[0], t[1], t[2])
             self.viewer.addItem(sphere)
-            self.camera_items.append((cam_name, sphere, t, R))
+            self.camera_items.append((cam_name, sphere, t, R, cam_model))  # Retain cam_model
+        else:
+            # Visualization for perspective cameras
+            frustum_size = size * 5
+            frustum_vertices = np.array([
+                [0, 0, 0],
+                [1,  1, -2],
+                [1, -1, -2],
+                [-1,  1, -2],
+                [-1, -1, -2],
+            ]) * frustum_size
 
-    def highlight_camera(self, cam_name, highlight_color=(1, 0, 0, 0.8)):
-        """指定されたカメラをハイライト"""
-        for name, sphere, _, _ in self.camera_items:
-            if name == cam_name:
-                sphere.setColor(highlight_color)
-            else:
-                sphere.setColor((1, 1, 1, 0.3))  # デフォルトカラーに戻す
+            # Transform vertices with rotation and translation
+            frustum_vertices = frustum_vertices @ - R + t
 
-    def move_to_camera(self, cam_name):
-        """指定されたカメラの位置と回転に視点を移動"""
-        for name, _, position, rotation_matrix in self.camera_items:
-            if name == cam_name:
-                # カメラ位置を新しい視点位置として設定
-                self.viewer.setCameraPosition(pos=QVector3D(position[0], position[1], position[2]), distance=10)
-                
-                # 回転行列から視点のピッチとヨーを計算
+            # Draw edges of the frustum
+            lines = [
+                (frustum_vertices[0], frustum_vertices[1]),
+                (frustum_vertices[0], frustum_vertices[2]),
+                (frustum_vertices[0], frustum_vertices[3]),
+                (frustum_vertices[0], frustum_vertices[4]),
+                (frustum_vertices[1], frustum_vertices[2]),
+                (frustum_vertices[2], frustum_vertices[4]),
+                (frustum_vertices[4], frustum_vertices[3]),
+                (frustum_vertices[3], frustum_vertices[1])
+            ]
+
+            # Save edges and draw
+            frustum_edges = []
+            for start, end in lines:
+                line = gl.GLLinePlotItem(pos=np.array([start, end]), color=(1, 1, 1, 0.5), width=1, antialias=True)
+                self.viewer.addItem(line)
+                frustum_edges.append(line)  # Save each edge
+
+            # Save the frustum edges in camera items
+            self.camera_items.append((cam_name, frustum_edges, t, R, cam_model))
+
+    def move_to_camera(self, image_name):
+        """Move viewpoint to the position associated with the specified image."""
+        for name, _, position, rotation_matrix, _ in self.camera_items:
+            if name == image_name:
+                logger.info(f"Moving to camera position for image '{image_name}'")
+                self.viewer.setCameraPosition(pos=QVector3D(position[0], position[1], position[2]), distance=20)
+
+                # Calculate pitch and yaw from the rotation matrix
                 yaw = np.arctan2(rotation_matrix[1, 0], rotation_matrix[0, 0])
                 pitch = np.arcsin(-rotation_matrix[2, 0])
-                
-                # 視点の回転を設定
+
+                # Set viewpoint rotation
                 self.viewer.setCameraPosition(elevation=np.degrees(pitch), azimuth=np.degrees(yaw))
                 break
+
+    def highlight_camera(self, cam_name, highlight_color=(1, 0, 0, 0.8)):
+        """Highlight the specified camera."""
+        for name, item, _, _, cam_model in self.camera_items:
+            if name == cam_name:
+                logger.info(f"Highlighting camera: {cam_name}")
+                if cam_model in ["spherical", "equirectangular"]:
+                    item.setColor(highlight_color)
+                else:
+                    for edge in item:
+                        edge.setData(color=highlight_color)
+            else:
+                # Reset to default color
+                if cam_model in ["spherical", "equirectangular"]:
+                    item.setColor((1, 1, 1, 0.3))
+                else:
+                    for edge in item:
+                        edge.setData(color=(1, 1, 1, 0.5))
+
 
 class MainWindow(QWidget):
     def __init__(self, file_path):
         super().__init__()
-        self.setWindowTitle("SAM2 Application")
+        self.setWindowTitle("Point Cloud Visualization")
         self.setGeometry(100, 100, 1200, 800)
-        
-        # スプリッターの作成
+
+        # Create splitter
         splitter = QSplitter(Qt.Horizontal)
-        
-        # 左側: 画像リスト
-        self.image_list = QListWidget()
-        self.image_list.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.image_list.customContextMenuRequested.connect(self.open_context_menu)
-        self.image_list.itemClicked.connect(self.on_image_click)
-        
-        # ポイントクラウドビジュアライザーのインスタンス作成
+
+        # Left side: organize images by camera name
+        self.image_tree = QTreeWidget()
+        self.image_tree.setHeaderLabel("Cameras")
+        self.image_tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.image_tree.customContextMenuRequested.connect(self.open_context_menu)
+        self.image_tree.itemClicked.connect(self.on_image_click)
+        self.image_tree.itemDoubleClicked.connect(self.on_image_double_click)  # Connect double-click signal
+
+        # Instance of the point cloud visualizer
         self.pointcloud_viewer = PointCloudVisualizer(file_path)
 
-        # レイアウトの設定
-        splitter.addWidget(self.image_list)
+        # Layout settings
+        splitter.addWidget(self.image_tree)
         splitter.addWidget(self.pointcloud_viewer)
         splitter.setSizes([200, 800])
 
         layout = QVBoxLayout(self)
         layout.addWidget(splitter)
 
-        # カメラ名リストの設定
-        camera_names = [name for name, _, _, _ in self.pointcloud_viewer.camera_items]
-        self.populate_image_list(camera_names)
+        # Load camera and image data from JSON file
+        self.load_camera_data(file_path)
 
-    def populate_image_list(self, camera_names):
-        """画像リストをカメラ名で埋める"""
-        self.image_list.clear()
-        for name in camera_names:
-            self.image_list.addItem(name)
+    def load_camera_data(self, file_path):
+        """Load camera and image data from JSON and populate tree."""
+        with open(file_path, 'r') as f:
+            data = json.load(f)
+
+        for item in data:
+            cameras = item.get("cameras", {})
+            shots = item.get("shots", {})
+
+            for camera_name, _ in cameras.items():
+                camera_item = QTreeWidgetItem(self.image_tree)
+                camera_item.setText(0, camera_name)
+
+                # Add images associated with each camera to the tree
+                for shot_name, shot_data in shots.items():
+                    if shot_data.get("camera") == camera_name:
+                        image_item = QTreeWidgetItem(camera_item)
+                        image_item.setText(0, shot_name)
 
     def open_context_menu(self, position: QPoint):
-        """右クリックでコンテキストメニューを表示し、選択したカメラ位置に移動"""
-        item = self.image_list.itemAt(position)
-        if item:
-            camera_name = item.text()
+        """Show context menu on right-click, move to the camera position of the selected image."""
+        item = self.image_tree.itemAt(position)
+        if item and item.parent():
+            image_name = item.text(0)
             menu = QMenu()
-            move_action = menu.addAction("move to camera position")
-            action = menu.exec_(self.image_list.mapToGlobal(position))
+            move_action = menu.addAction("Move to camera position")
+            action = menu.exec_(self.image_tree.mapToGlobal(position))
             if action == move_action:
-                self.pointcloud_viewer.move_to_camera(camera_name)
+                logger.info(f"Context menu: Move to camera position for image '{image_name}'")
+                self.pointcloud_viewer.move_to_camera(image_name)
 
     def on_image_click(self, item):
-        """画像リストの項目がクリックされたときに対応するカメラをハイライト"""
-        camera_name = item.text()
-        self.pointcloud_viewer.highlight_camera(camera_name)
+        """Highlight the camera associated with the clicked image."""
+        if item.parent():
+            image_name = item.text(0)
+            logger.info(f"Image clicked: Highlight camera {image_name}")
+            self.pointcloud_viewer.highlight_camera(image_name)
+
+    def on_image_double_click(self, item):
+        """Move to the camera position associated with the double-clicked image."""
+        if item.parent():  # Check if the item is an image (not a camera)
+            image_name = item.text(0)
+            logger.info(f"Image double-clicked: Move to camera position for image '{image_name}'")
+            self.pointcloud_viewer.move_to_camera(image_name)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

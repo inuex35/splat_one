@@ -21,7 +21,7 @@ class MainApp(QMainWindow):
 
         # Initialize MaskManager and Visualizer
         self.mask_manager = None
-        self.visualizer = MainWindow("reconstruction.json")
+        self.visualizer = MainWindow("reconstruction_example.json")
 
         # Layout for main content
         layout = QVBoxLayout()
