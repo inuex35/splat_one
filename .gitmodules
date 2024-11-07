@@ -1,0 +1,16 @@
+[submodule "submodules/sam2"]
+	path = submodules/sam2
+	url = https://github.com/facebookresearch/sam2.git
+[submodule "submodules/opensfm"]
+	path = submodules/opensfm
+	url = https://github.com/inuex35/ind-bermuda-opensfm.git
+[submodule "submodules/lightglue"]
+	path = submodules/lightglue
+	url = https://github.com/cvg/LightGlue.git
+[submodule "submodules/aliked"]
+	path = submodules/aliked
+	url = https://github.com/Shiaoming/ALIKED.git
+[submodule "submodules/gsplat"]
+	path = submodules/gsplat
+	url = https://github.com/inuex35/gsplat.git
+	branch = spherical_render
