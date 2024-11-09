@@ -142,7 +142,13 @@ class MainApp(QMainWindow):
             if not self.masks_tab_initialized:
                 self.init_masks_tab()
                 self.masks_tab_initialized = True
-
+            else:
+                if self.mask_manager.predictor is None:
+                    self.mask_manager.init_sam_model()
+        else:
+            if self.masks_tab_initialized and self.mask_manager.predictor is not None:
+                self.mask_manager.unload_sam_model()
+                    
     def init_masks_tab(self):
         """Initialize the Masks tab."""
         if self.workdir is None:

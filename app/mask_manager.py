@@ -87,6 +87,22 @@ class MaskManager(QWidget):
             self.predictor = SAM2ImagePredictor(self.sam_model)
             guru.info(f"SAM2 model loaded with checkpoint: {self.checkpoint_path}")
 
+    def unload_sam_model(self):
+        """Unload the SAM2 model and free resources."""
+        if self.sam_model is not None:
+            # Delete model and predictor to free up memory
+            del self.sam_model
+            del self.predictor
+            self.sam_model = None
+            self.predictor = None
+            guru.info("SAM2 model and predictor have been unloaded.")
+
+            # Optionally clear CUDA cache if using GPU
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                guru.info("CUDA cache has been cleared.")
+
     def load_current_image(self):
         """Load and display the current image."""
         self.input_points = []
