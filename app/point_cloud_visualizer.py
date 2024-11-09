@@ -1,14 +1,15 @@
 import numpy as np
-from PyQt5.QtWidgets import QWidget, QGridLayout, QPushButton, QMessageBox
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QGridLayout, QMessageBox
 from PyQt5.QtCore import Qt, QPoint
 from PyQt5.QtGui import QVector3D, QMatrix4x4  # 必要なモジュールのインポート
 import pyqtgraph.opengl as gl
 import pyqtgraph as pg
+from opensfm import dataset
 from utils.logger import setup_logger
 import json
 import sys
 from scipy.spatial.transform import Rotation
-
+import os
 # ログの設定
 logger = setup_logger()
 
@@ -29,26 +30,40 @@ def load_reconstruction(file_path: str):
         logger.error(f"File {file_path} is not valid JSON.")
         return None
 
-class PointCloudVisualizer(QWidget):
-    def __init__(self, file_path):
+class Reconstruction(QWidget):
+    def __init__(self, workdir):
         super().__init__()
-        self.file_path = file_path
-
-        # レイアウトの設定
-        self.layout = QGridLayout()
-        self.setLayout(self.layout)
-
+        self.workdir = workdir
+        self.reconstruction_file = os.path.join(workdir, "reconstruction.json")
+        
+        # メインレイアウトの設定
+        main_layout = QVBoxLayout(self)
+        
         # GLViewWidgetの初期設定
         self.viewer = gl.GLViewWidget()
         self.viewer.setWindowTitle("Point Cloud and Camera Visualization")
         self.viewer.setCameraPosition(distance=50)
-        self.layout.addWidget(self.viewer, 0, 0, 1, 1)
-
-        # "Run Reconstruction" ボタンの追加
+        
+        # メインレイアウトにGLViewWidgetを追加
+        main_layout.addWidget(self.viewer)
+        
+        # ボタンを横に並べるためのQHBoxLayoutを追加
+        button_layout = QHBoxLayout()
+        
+        # "Run Reconstruction" ボタン
         self.run_button = QPushButton("Run Reconstruction")
         self.run_button.clicked.connect(self.run_reconstruction)
-        self.layout.addWidget(self.run_button, 1, 0, 1, 1)
+        button_layout.addWidget(self.run_button)
 
+        # "Config" ボタンを同じ行に追加
+        self.config_button = QPushButton("Config")
+        self.config_button.clicked.connect(self.configure_reconstruction)
+        button_layout.addWidget(self.config_button)
+        
+        # QVBoxLayoutにボタンのQHBoxLayoutを追加
+        main_layout.addLayout(button_layout)
+        
+        # カメラアイテムのリストを初期化
         self.camera_items = []
         
         # 初期表示の更新
@@ -60,7 +75,7 @@ class PointCloudVisualizer(QWidget):
         # Reconstruction logic here
         # For now, just update the visualization
         self.update_visualization()
-        data = load_reconstruction(self.file_path)
+        data = load_reconstruction(self.reconstruction_file)
         if data is not None:
             reply = QMessageBox.question(self, 'Confirmation', 'Reconstruction data found. Do you want to run the reconstruction?', QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
             if reply == QMessageBox.Yes:
@@ -73,12 +88,15 @@ class PointCloudVisualizer(QWidget):
         else:
             logger.info("No reconstruction data found.")
 
+    def configure_reconstruction(self):
+        """Open the configuration dialog for feature extraction."""
+        QMessageBox.information(self, "Feature Extraction", "Feature extraction configuration dialog.")
+
     def update_visualization(self):
         """ポイントクラウドとカメラの可視化を更新"""
         self.viewer.items.clear()
-        
         # 現在のファイルを取得してデータを読み込む
-        data = load_reconstruction(self.file_path)
+        data = load_reconstruction(self.reconstruction_file)
         if data is None:
             # データがない場合、立方体を表示して「No reconstruction」を示す
             self.show_placeholder()

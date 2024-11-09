@@ -1,7 +1,7 @@
 import os
 import cv2
 import numpy as np
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QSizePolicy, QMessageBox
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QMessageBox
 from PyQt5.QtGui import QPixmap, QImage
 from PyQt5.QtCore import Qt
 from opensfm import dataset
@@ -31,10 +31,18 @@ class FeatureExtractor(QWidget):
         # 下部に空間を追加して中央に配置
         layout.addStretch(1)
 
-        # Extract Features button at the bottom
-        self.extract_button = QPushButton("Extract Features for All Images")
+        button_layout = QHBoxLayout()
+
+        # Previous Image Button
+        self.extract_button = QPushButton("Extract Features")
         self.extract_button.clicked.connect(self.run_detect_features)
-        layout.addWidget(self.extract_button, alignment=Qt.AlignBottom)
+        button_layout.addWidget(self.extract_button)
+
+        # Reset Mask Button
+        self.config_button = QPushButton("Config")
+        self.config_button.clicked.connect(self.configure_features)
+        button_layout.addWidget(self.config_button)
+        layout.addLayout(button_layout)
 
         self.setLayout(layout)
 
@@ -56,14 +64,17 @@ class FeatureExtractor(QWidget):
         detect_features.run_dataset(self.dataset)
         QMessageBox.information(self, "Feature Extraction", "Feature extraction completed for all images.")
 
+    def configure_features(self):
+        """Open the configuration dialog for feature extraction."""
+        QMessageBox.information(self, "Feature Extraction", "Feature extraction configuration dialog.")
+
     def show_original_image(self, image_name):
         """Show the original image in QLabel when no features are available."""
         image_path = os.path.join(self.workdir, "images", image_name)
         image = cv2.imread(image_path)
         if image is not None:
-            rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            self.current_image = rgb_image  # 現在の画像を保持
-            self.set_image_to_label(rgb_image)
+            self.current_image = image  # 現在の画像を保持
+            self.set_image_to_label(image)
         else:
             self.display_label.setText("Image not found.")
 
@@ -80,9 +91,8 @@ class FeatureExtractor(QWidget):
             center = (int(p[0]), int(p[1]))
             cv2.circle(image, center, int(s), (0, 255, 255), thickness=2, lineType=cv2.LINE_AA)  # Yellow circles
 
-        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        self.current_image = rgb_image  # 現在の画像を保持
-        self.set_image_to_label(rgb_image)
+        self.current_image = image  # 現在の画像を保持
+        self.set_image_to_label(image)
 
     def set_image_to_label(self, rgb_image):
         """Resize the image to fit the QLabel width while maintaining aspect ratio and display it."""

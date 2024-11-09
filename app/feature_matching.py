@@ -18,10 +18,10 @@ class FeatureMatching(QWidget):
         self.current_image_right = None
 
         # UI のセットアップ
-        main_layout = QVBoxLayout()
+        layout = QVBoxLayout()
 
         # 上部に空間を追加して中央に配置
-        main_layout.addStretch(1)
+        layout.addStretch(1)
 
         # 左右の画像表示用ラベルを追加
         image_layout = QHBoxLayout()
@@ -35,17 +35,25 @@ class FeatureMatching(QWidget):
         self.display_label_right.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         image_layout.addWidget(self.display_label_right)
 
-        main_layout.addLayout(image_layout)
+        layout.addLayout(image_layout)
 
         # 下部に空間を追加して中央に配置
-        main_layout.addStretch(1)
+        layout.addStretch(1)
 
-        # 全画像のマッチング実行ボタン
-        self.match_button = QPushButton("Match Features for All Images")
+        button_layout = QHBoxLayout()
+
+        # Previous Image Button
+        self.match_button = QPushButton("Match Features")
         self.match_button.clicked.connect(self.run_match_features)
-        main_layout.addWidget(self.match_button, alignment=Qt.AlignBottom)
+        button_layout.addWidget(self.match_button)
 
-        self.setLayout(main_layout)
+        # Reset Mask Button
+        self.config_button = QPushButton("Config")
+        self.config_button.clicked.connect(self.configure_matching)
+        button_layout.addWidget(self.config_button)
+        layout.addLayout(button_layout)
+
+        self.setLayout(layout)
 
     def resizeEvent(self, event):
         """リサイズイベントを処理し、表示中の画像を QLabel のサイズに合わせて調整します。"""
@@ -73,6 +81,10 @@ class FeatureMatching(QWidget):
         """全画像での特徴点マッチングを実行します。"""
         match_features.run_dataset(self.dataset)
         QMessageBox.information(self, "Matching Completed", "Feature matching completed for all images.")
+
+    def configure_matching(self):
+        """Open the configuration dialog for feature extraction."""
+        QMessageBox.information(self, "Feature Extraction", "Feature extraction configuration dialog.")
 
     def plot_matches(self, matches_data):
         """左右の画像の特徴点マッチング結果をプロットし、表示します。"""

@@ -12,7 +12,7 @@ from opensfm.dataset import DataSet
 from app.mask_manager import MaskManager  # Import the updated MaskManager class
 from app.feature_extractor import FeatureExtractor  # 新しく追加
 from app.feature_matching import FeatureMatching  # 新しく追加
-from app.point_cloud_visualizer import PointCloudVisualizer  # Import the PointCloudVisualizer class
+from app.point_cloud_visualizer import Reconstruction  # Import the PointCloudVisualizer class
 class StartDialog(QDialog):
     """Dialog to offer options at startup."""
     def __init__(self, parent=None):
@@ -260,8 +260,8 @@ class MainApp(QMainWindow):
         layout.addWidget(self.camera_image_tree)
 
         # Right side: PointCloudVisualizer widget
-        self.pointcloud_viewer = PointCloudVisualizer(file_path=self.workdir + "/reconstruction.json")
-        layout.addWidget(self.pointcloud_viewer)
+        self.reconstruction_viewer = Reconstruction(self.workdir)
+        layout.addWidget(self.reconstruction_viewer)
 
         # Set layout for reconstruct tab
         self.reconstruct_tab.setLayout(QVBoxLayout())
@@ -294,8 +294,8 @@ class MainApp(QMainWindow):
             if not self.reconstruct_tab_initialized:
                 self.init_reconstruct_tab()
                 self.reconstruct_tab_initialized = True
-            elif self.pointcloud_viewer:
-                self.pointcloud_viewer.update_visualization()
+            elif self.reconstruction_viewer:
+                self.reconstruction_viewer.update_visualization()
 
         elif tab_name == "Features":
             # Featureタブの初期化処理
@@ -489,13 +489,13 @@ class MainApp(QMainWindow):
         """Handle single click event for camera_image_tree and pass image name to PointCloudVisualizer."""
         if item.childCount() == 0 and item.parent() is not None:  # 画像項目のみ反応
             image_name = item.text(0)
-            self.pointcloud_viewer.on_camera_image_tree_click(image_name)
+            self.reconstruction_viewer.on_camera_image_tree_click(image_name)
 
     def handle_camera_image_tree_double_click(self, item, column):
         """Handle double click event for camera_image_tree and move to the camera position."""
         if item.childCount() == 0 and item.parent() is not None:  # 画像項目のみ反応
             image_name = item.text(0)
-            self.pointcloud_viewer.on_camera_image_tree_double_click(image_name)
+            self.reconstruction_viewer.on_camera_image_tree_double_click(image_name)
 
     def on_image_selected_left(self, item, column):
         """Handle image selection in the left camera tree."""

@@ -82,7 +82,8 @@ class MaskManager(QWidget):
     def init_sam_model(self):
         """Initialize the SAM2 model and predictor."""
         if self.sam_model is None:
-            self.sam_model = build_sam2(self.config_path, self.checkpoint_path)
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            self.sam_model = build_sam2(self.config_path, self.checkpoint_path, device=device)
             self.predictor = SAM2ImagePredictor(self.sam_model)
             guru.info(f"SAM2 model loaded with checkpoint: {self.checkpoint_path}")
 
