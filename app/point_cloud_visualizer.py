@@ -56,7 +56,8 @@ class PointCloudVisualizer(QWidget):
         # 現在のファイルを取得してデータを読み込む
         data = load_reconstruction(self.file_path)
         if data is None:
-            logger.error("No data loaded; cannot update visualization.")
+            # データがない場合、立方体を表示して「No reconstruction」を示す
+            self.show_placeholder()
             return
 
         # ポイントクラウドとカメラのデータを取得
@@ -151,6 +152,18 @@ class PointCloudVisualizer(QWidget):
             # Save the frustum edges in camera items
             self.camera_items.append((cam_name, frustum_edges, t, R, cam_model))
 
+    def show_placeholder(self):
+        """球体上に「No reconstruction」という文字を表示"""
+        # 球体の基本設定
+        radius = 10
+        rows, cols = 20, 40
+
+        # 球体のメッシュを生成
+        sphere_mesh = gl.MeshData.sphere(rows=rows, cols=cols)
+        sphere = gl.GLMeshItem(meshdata=sphere_mesh, color=(0.3, 0.3, 0.3, 0.5), smooth=True, drawEdges=True)
+        sphere.scale(radius, radius, radius)
+        self.viewer.addItem(sphere)
+
     def move_to_camera(self, image_name):
         """Move viewpoint to the position associated with the specified image."""
         for name, _, position, rotation_matrix, _ in self.camera_items:
@@ -184,6 +197,13 @@ class PointCloudVisualizer(QWidget):
                     for edge in item:
                         edge.setData(color=(1, 1, 1, 0.5))
 
+    def on_camera_image_tree_click(self, image_name):
+        """クリックされた画像に関連付けられたカメラをハイライト"""
+        self.highlight_camera(image_name)
+
+    def on_camera_image_tree_double_click(self, image_name):
+        """ダブルクリックされた画像に関連付けられたカメラ位置に移動"""
+        self.move_to_camera(image_name)
 
 class MainWindow(QWidget):
     def __init__(self, file_path):

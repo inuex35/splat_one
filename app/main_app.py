@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, QTimer
 from opensfm.dataset import DataSet
 from app.mask_manager import MaskManager  # Import the updated MaskManager class
-
+from app.point_cloud_visualizer import PointCloudVisualizer  # Import the PointCloudVisualizer class
 class StartDialog(QDialog):
     """Dialog to offer options at startup."""
     def __init__(self, parent=None):
@@ -65,6 +65,7 @@ class MainApp(QMainWindow):
         self.mask_manager_widget = None  # Add this line
         self.workdir = None
         self.masks_tab_initialized = False  # Flag to check if Masks tab is initialized
+        self.reconstruct_tab_initialized = False
 
         # Set up tab widget
         self.tab_widget = QTabWidget()
@@ -98,9 +99,6 @@ class MainApp(QMainWindow):
 
         # Initialize each tab's content
         self.init_images_tab()
-        #self.init_masks_tab()
-        # Features, Matching, Gsplat tabs are placeholders for now
-        #self.init_reconstruct_tab()
 
     def init_images_tab(self):
         """Initialize the Images tab."""
@@ -134,21 +132,7 @@ class MainApp(QMainWindow):
 
         # Connect signals
         self.images_tree.itemClicked.connect(self.display_image_and_exif)
-
-    def on_tab_changed(self, index):
-        """Handle actions when a tab is changed."""
-        tab_name = self.tab_widget.tabText(index)
-        if tab_name == "Masks":
-            if not self.masks_tab_initialized:
-                self.init_masks_tab()
-                self.masks_tab_initialized = True
-            else:
-                if self.mask_manager.predictor is None:
-                    self.mask_manager.init_sam_model()
-        else:
-            if self.masks_tab_initialized and self.mask_manager.predictor is not None:
-                self.mask_manager.unload_sam_model()
-                    
+                   
     def init_masks_tab(self):
         """Initialize the Masks tab."""
         if self.workdir is None:
@@ -188,10 +172,61 @@ class MainApp(QMainWindow):
         self.masks_tab.layout().addWidget(layout)
 
         # Now, call populate_mask_list() after self.masks_tree is initialized
-        self.populate_mask_list()
+        self.populate_tree_with_camera_data(self.masks_tree)
 
         # Connect signals
         self.masks_tree.itemClicked.connect(self.display_mask)
+
+    def init_reconstruct_tab(self):
+        """Initialize the Reconstruct tab with a point cloud viewer and image tree."""
+        layout = QSplitter(Qt.Horizontal)
+
+        # カメラと画像のリストツリービュー
+        self.camera_image_tree = QTreeWidget()
+        self.camera_image_tree.setHeaderLabel("Cameras and Images")
+        layout.addWidget(self.camera_image_tree)
+
+        # 点群の3Dビューワー
+        self.pointcloud_viewer = PointCloudVisualizer(file_path=self.workdir + "/reconstruction.json")
+        layout.addWidget(self.pointcloud_viewer)
+
+        # イベント接続の確認
+        self.camera_image_tree.itemClicked.connect(self.handle_camera_image_tree_click)
+        self.camera_image_tree.itemDoubleClicked.connect(self.handle_camera_image_tree_double_click)
+
+        # reconstructタブにレイアウトを設定
+        self.reconstruct_tab.setLayout(QVBoxLayout())
+        self.reconstruct_tab.layout().addWidget(layout)
+
+        # 画像とカメラのデータをツリービューに追加
+        self.populate_tree_with_camera_data(self.camera_image_tree)
+
+
+    def on_tab_changed(self, index):
+        """Handle actions when a tab is changed."""
+        tab_name = self.tab_widget.tabText(index)
+        
+        if tab_name == "Masks":
+            # Masksタブの初期化処理
+            if not self.masks_tab_initialized:
+                self.init_masks_tab()
+                self.masks_tab_initialized = True
+            else:
+                if self.mask_manager.predictor is None:
+                    self.mask_manager.init_sam_model()
+        elif tab_name == "Reconstruct":
+            # Reconstructionタブの初期化処理
+            if not self.reconstruct_tab_initialized:
+                self.init_reconstruct_tab()
+                self.reconstruct_tab_initialized = True
+            else:
+                # 追加の初期化が必要な場合、例えばデータのリロードなど
+                if self.pointcloud_viewer:
+                    self.pointcloud_viewer.update_visualization()
+        else:
+            # 他のタブを選択したときの処理（必要であれば）
+            if self.masks_tab_initialized and self.mask_manager.predictor is not None:
+                self.mask_manager.unload_sam_model()
 
     def show_start_dialog(self):
         """Display a dialog to select an option at startup."""
@@ -236,35 +271,30 @@ class MainApp(QMainWindow):
             # Create or check masks folder
             mask_dir = os.path.join(self.workdir, "masks")
             if new_project:
-                # For new projects, create masks folder
                 os.makedirs(mask_dir, exist_ok=True)
             else:
-                # For existing data, check if masks folder exists
                 if not os.path.exists(mask_dir):
-                    QMessageBox.warning(self, "Error", "masks folder does not exist in the selected directory.")
-                    return
+                    os.makedirs(mask_dir, exist_ok=True)
 
             # Set self.image_list here
             self.image_list = [
                 f for f in os.listdir(img_dir)
                 if f.lower().endswith(('.png', '.jpg', '.jpeg'))
             ]
+
             if self.image_list:
-                # Initialize MaskManager will be done when Masks tab is opened
-                # Update image tree
-                self.populate_image_tree()
-                # Remove or comment out the following line:
-                # self.populate_mask_list()
+                # 再表示: imagesタブ用のimages_treeにデータを再設定
+                self.populate_tree_with_camera_data(self.images_tree)
                 QMessageBox.information(self, "Success", "Workdir loaded successfully.")
             else:
                 QMessageBox.warning(self, "Error", "No images found in the images folder.")
                 return
 
-    def populate_image_tree(self):
-        """Populate the images tree in the Images tab, grouped by camera."""
-        self.images_tree.clear()
-        camera_groups = {}
 
+    def populate_tree_with_camera_data(self, tree_widget):
+        """Populate the specified tree widget with camera and image data."""
+        tree_widget.clear()
+        camera_groups = {}
         exif_dir = os.path.join(self.workdir, "exif")
 
         for image_name in self.image_list:
@@ -282,35 +312,7 @@ class MainApp(QMainWindow):
             camera_groups[camera].append(image_name)
 
         for camera, images in camera_groups.items():
-            camera_item = QTreeWidgetItem(self.images_tree)
-            camera_item.setText(0, camera)
-            for img in images:
-                img_item = QTreeWidgetItem(camera_item)
-                img_item.setText(0, img)
-
-    def populate_mask_list(self):
-        """Populate the masks tree in the Masks tab, grouped by camera."""
-        self.masks_tree.clear()
-        camera_groups = {}
-
-        exif_dir = os.path.join(self.workdir, "exif")
-
-        for image_name in self.image_list:
-            exif_file = os.path.join(exif_dir, image_name + '.exif')
-            if os.path.exists(exif_file):
-                with open(exif_file, 'r') as f:
-                    exif_data = json.load(f)
-                camera = exif_data.get('camera', 'Unknown Camera')
-            else:
-                camera = 'Unknown Camera'
-
-            if camera not in camera_groups:
-                camera_groups[camera] = []
-
-            camera_groups[camera].append(image_name)
-
-        for camera, images in camera_groups.items():
-            camera_item = QTreeWidgetItem(self.masks_tree)
+            camera_item = QTreeWidgetItem(tree_widget)
             camera_item.setText(0, camera)
             for img in images:
                 img_item = QTreeWidgetItem(camera_item)
@@ -391,6 +393,20 @@ class MainApp(QMainWindow):
         else:
             # Clicked on a camera group
             pass
+
+    def handle_camera_image_tree_click(self, item, column):
+        """Handle single click event for camera_image_tree and pass image name to PointCloudVisualizer."""
+        if item.childCount() == 0 and item.parent() is not None:  # 画像項目のみ反応
+            image_name = item.text(0)
+            self.pointcloud_viewer.on_camera_image_tree_click(image_name)
+
+    def handle_camera_image_tree_double_click(self, item, column):
+        """Handle double click event for camera_image_tree and move to the camera position."""
+        if item.childCount() == 0 and item.parent() is not None:  # 画像項目のみ反応
+            image_name = item.text(0)
+            self.pointcloud_viewer.on_camera_image_tree_double_click(image_name)
+
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
