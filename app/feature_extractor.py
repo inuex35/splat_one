@@ -84,14 +84,14 @@ class FeatureExtractor(QWidget):
         image = self.dataset.load_image(image_name)
         h, w, _ = image.shape
         pixels = features.denormalized_image_coordinates(features_data.points, w, h)
-        sizes = features_data.points[:, 2] * max(w, h)
+        fixed_size = 5  # 円の固定半径
 
-        # Draw features on the image
-        for p, s in zip(pixels, sizes):
+        for p in pixels:
             center = (int(p[0]), int(p[1]))
-            cv2.circle(image, center, int(s), (0, 255, 255), thickness=2, lineType=cv2.LINE_AA)  # Yellow circles
+            cv2.circle(image, center, fixed_size, (0, 255, 255), thickness=2, lineType=cv2.LINE_AA)  # Yellow circles
 
-        self.current_image = image  # 現在の画像を保持
+        # 現在の画像を保持し、ラベルに設定
+        self.current_image = image  
         self.set_image_to_label(image)
 
     def set_image_to_label(self, rgb_image):

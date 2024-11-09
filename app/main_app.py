@@ -2,6 +2,7 @@
 import sys
 import os
 import json
+import shutil
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QToolBar, QAction, QFileDialog, QMessageBox,
     QDialog, QVBoxLayout, QPushButton, QLabel, QWidget, QTabWidget, QSplitter,
@@ -344,9 +345,12 @@ class MainApp(QMainWindow):
                 dataset = DataSet(self.workdir)
                 from opensfm.actions import extract_metadata
                 extract_metadata.run_dataset(dataset)
-                QMessageBox.information(self, "Success", "Metadata extracted successfully.")
+                
+                config_src = "config/config.yaml" 
+                config_dest = os.path.join(self.workdir, "config.yaml")
+                shutil.copy(config_src, config_dest)                
             except Exception as e:
-                QMessageBox.warning(self, "Error", f"Failed to extract metadata: {e}")
+                QMessageBox.warning(self, "Error", f"Failed to extract metadata or copy config.yaml: {e}")
                 return
 
             # Create or check masks folder
