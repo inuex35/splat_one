@@ -10,6 +10,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, QTimer
 from opensfm.dataset import DataSet
 from app.mask_manager import MaskManager  # Import the updated MaskManager class
+from app.feature_extractor import FeatureExtractor  # 新しく追加
 from app.point_cloud_visualizer import PointCloudVisualizer  # Import the PointCloudVisualizer class
 class StartDialog(QDialog):
     """Dialog to offer options at startup."""
@@ -65,6 +66,8 @@ class MainApp(QMainWindow):
         self.mask_manager_widget = None  # Add this line
         self.workdir = None
         self.masks_tab_initialized = False  # Flag to check if Masks tab is initialized
+        self.features_tab_initialized = False
+        self.feature_extractor = None  # FeatureExtractor インスタンスを格納
         self.reconstruct_tab_initialized = False
 
         # Set up tab widget
@@ -105,9 +108,10 @@ class MainApp(QMainWindow):
         layout = QSplitter(Qt.Horizontal)
 
         # Left side: Tree of images grouped by camera
-        self.images_tree = QTreeWidget()
-        self.images_tree.setHeaderHidden(True)
-        layout.addWidget(self.images_tree)
+        self.camera_image_tree = QTreeWidget()
+        self.camera_image_tree.setHeaderLabel("Cameras and Images")
+        self.camera_image_tree.setFixedWidth(250)  # 固定幅を設定
+        layout.addWidget(self.camera_image_tree)
 
         # Right side: Splitter with image viewer and EXIF display
         right_splitter = QSplitter(Qt.Vertical)
@@ -127,14 +131,26 @@ class MainApp(QMainWindow):
 
         layout.addWidget(right_splitter)
 
+        # ストレッチファクターの設定
+        layout.setStretchFactor(0, 1)  # 左側を1
+        layout.setStretchFactor(1, 4)  # 右側を4
+
         self.images_tab.setLayout(QVBoxLayout())
         self.images_tab.layout().addWidget(layout)
 
         # Connect signals
-        self.images_tree.itemClicked.connect(self.display_image_and_exif)
-                   
+        self.camera_image_tree.itemClicked.connect(self.display_image_and_exif)
+
     def init_masks_tab(self):
         """Initialize the Masks tab."""
+        layout = QSplitter(Qt.Horizontal)
+
+        # Left side: Tree of images grouped by camera (like other tabs)
+        self.camera_image_tree = QTreeWidget()
+        self.camera_image_tree.setHeaderLabel("Cameras and Images")
+        self.camera_image_tree.setFixedWidth(250)  # 固定幅を設定
+        layout.addWidget(self.camera_image_tree)
+
         if self.workdir is None:
             QMessageBox.warning(self, "Error", "Work directory is not set.")
             return
@@ -156,77 +172,101 @@ class MainApp(QMainWindow):
                 checkpoint_path, config_path, mask_dir, img_dir, self.image_list
             )
 
-        layout = QSplitter(Qt.Horizontal)
-
-        # Left side: Tree of masks grouped by camera
-        self.masks_tree = QTreeWidget()
-        self.masks_tree.setHeaderHidden(True)
-        layout.addWidget(self.masks_tree)
-
         # Right side: MaskManager widget
         self.mask_manager_widget = MaskManagerWidget(parent=self)
         layout.addWidget(self.mask_manager_widget)
 
-        # Set new layout for masks_tab
+        # Set stretch factors
+        layout.setStretchFactor(0, 1)  # Left side (image tree)
+        layout.setStretchFactor(1, 4)  # Right side (MaskManager)
+
+        # Set layout for mask tab
         self.masks_tab.setLayout(QVBoxLayout())
         self.masks_tab.layout().addWidget(layout)
 
-        # Now, call populate_mask_list() after self.masks_tree is initialized
-        self.populate_tree_with_camera_data(self.masks_tree)
+        # Populate the camera image tree
+        self.populate_tree_with_camera_data(self.camera_image_tree)
 
         # Connect signals
-        self.masks_tree.itemClicked.connect(self.display_mask)
+        self.camera_image_tree.itemClicked.connect(self.display_mask)
 
-    def init_reconstruct_tab(self):
-        """Initialize the Reconstruct tab with a point cloud viewer and image tree."""
+    def init_features_tab(self):
+        """Initialize the Features tab."""
         layout = QSplitter(Qt.Horizontal)
 
-        # カメラと画像のリストツリービュー
+        # Left side: Tree of images grouped by camera
         self.camera_image_tree = QTreeWidget()
         self.camera_image_tree.setHeaderLabel("Cameras and Images")
+        self.camera_image_tree.setFixedWidth(250)  # 固定幅を設定
         layout.addWidget(self.camera_image_tree)
 
-        # 点群の3Dビューワー
+        # Right side: FeatureExtractor widget
+        self.feature_extractor = FeatureExtractor(self.workdir, self.image_list)
+        layout.addWidget(self.feature_extractor)
+
+        # Set layout for features tab
+        self.features_tab.setLayout(QVBoxLayout())
+        self.features_tab.layout().addWidget(layout)
+
+        self.populate_tree_with_camera_data(self.camera_image_tree)
+
+        # Connect signals
+        self.camera_image_tree.itemClicked.connect(self.display_features_for_image)
+
+
+    def init_reconstruct_tab(self):
+        """Initialize the Reconstruct tab."""
+        layout = QSplitter(Qt.Horizontal)
+
+        # Left side: Tree of images grouped by camera
+        self.camera_image_tree = QTreeWidget()
+        self.camera_image_tree.setHeaderLabel("Cameras and Images")
+        self.camera_image_tree.setFixedWidth(250)  # 固定幅を設定
+        layout.addWidget(self.camera_image_tree)
+
+        # Right side: PointCloudVisualizer widget
         self.pointcloud_viewer = PointCloudVisualizer(file_path=self.workdir + "/reconstruction.json")
         layout.addWidget(self.pointcloud_viewer)
 
-        # イベント接続の確認
-        self.camera_image_tree.itemClicked.connect(self.handle_camera_image_tree_click)
-        self.camera_image_tree.itemDoubleClicked.connect(self.handle_camera_image_tree_double_click)
-
-        # reconstructタブにレイアウトを設定
+        # Set layout for reconstruct tab
         self.reconstruct_tab.setLayout(QVBoxLayout())
         self.reconstruct_tab.layout().addWidget(layout)
 
-        # 画像とカメラのデータをツリービューに追加
-        self.populate_tree_with_camera_data(self.camera_image_tree)
+        # Connect signals
+        self.camera_image_tree.itemClicked.connect(self.handle_camera_image_tree_click)
+        self.camera_image_tree.itemDoubleClicked.connect(self.handle_camera_image_tree_double_click)
 
+        # Populate the tree with camera data
+        self.populate_tree_with_camera_data(self.camera_image_tree)
 
     def on_tab_changed(self, index):
         """Handle actions when a tab is changed."""
         tab_name = self.tab_widget.tabText(index)
         
         if tab_name == "Masks":
-            # Masksタブの初期化処理
             if not self.masks_tab_initialized:
                 self.init_masks_tab()
                 self.masks_tab_initialized = True
-            else:
-                if self.mask_manager.predictor is None:
-                    self.mask_manager.init_sam_model()
-        elif tab_name == "Reconstruct":
-            # Reconstructionタブの初期化処理
+            elif self.mask_manager.sam_model is None:
+                self.mask_manager.init_sam_model()
+        else:
+            if self.mask_manager is not None:
+                self.mask_manager.unload_sam_model()
+
+        if tab_name == "Reconstruct":
             if not self.reconstruct_tab_initialized:
                 self.init_reconstruct_tab()
                 self.reconstruct_tab_initialized = True
-            else:
-                # 追加の初期化が必要な場合、例えばデータのリロードなど
-                if self.pointcloud_viewer:
-                    self.pointcloud_viewer.update_visualization()
-        else:
-            # 他のタブを選択したときの処理（必要であれば）
-            if self.masks_tab_initialized and self.mask_manager.predictor is not None:
-                self.mask_manager.unload_sam_model()
+            elif self.pointcloud_viewer:
+                self.pointcloud_viewer.update_visualization()
+
+        elif tab_name == "Features":
+            # Featureタブの初期化処理
+            if not self.features_tab_initialized:
+                self.init_features_tab()  # Featuresタブの初期化メソッドを呼び出す
+                self.features_tab_initialized = True
+
+        
 
     def show_start_dialog(self):
         """Display a dialog to select an option at startup."""
@@ -284,7 +324,7 @@ class MainApp(QMainWindow):
 
             if self.image_list:
                 # 再表示: imagesタブ用のimages_treeにデータを再設定
-                self.populate_tree_with_camera_data(self.images_tree)
+                self.populate_tree_with_camera_data(self.camera_image_tree)
                 QMessageBox.information(self, "Success", "Workdir loaded successfully.")
             else:
                 QMessageBox.warning(self, "Error", "No images found in the images folder.")
@@ -393,6 +433,16 @@ class MainApp(QMainWindow):
         else:
             # Clicked on a camera group
             pass
+
+    def display_features_for_image(self, item, column):
+        """Display features for the selected image."""
+        # 画像名を取得
+        image_name = item.text(0)  # 修正: 列を指定
+        if self.feature_extractor:
+            # FeatureExtractorで選択された画像をロードして特徴を抽出
+            self.feature_extractor.load_image_by_name(image_name)
+        else:
+            QMessageBox.warning(self, "Error", "Feature extractor is not initialized.")
 
     def handle_camera_image_tree_click(self, item, column):
         """Handle single click event for camera_image_tree and pass image name to PointCloudVisualizer."""

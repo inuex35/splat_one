@@ -1,5 +1,5 @@
 import numpy as np
-from PyQt5.QtWidgets import QWidget, QGridLayout, QSplitter, QListWidget, QVBoxLayout, QApplication, QMenu, QTreeWidget, QTreeWidgetItem
+from PyQt5.QtWidgets import QWidget, QGridLayout, QPushButton, QMessageBox
 from PyQt5.QtCore import Qt, QPoint
 from PyQt5.QtGui import QVector3D, QMatrix4x4  # 必要なモジュールのインポート
 import pyqtgraph.opengl as gl
@@ -44,10 +44,34 @@ class PointCloudVisualizer(QWidget):
         self.viewer.setCameraPosition(distance=50)
         self.layout.addWidget(self.viewer, 0, 0, 1, 1)
 
+        # "Run Reconstruction" ボタンの追加
+        self.run_button = QPushButton("Run Reconstruction")
+        self.run_button.clicked.connect(self.run_reconstruction)
+        self.layout.addWidget(self.run_button, 1, 0, 1, 1)
+
         self.camera_items = []
         
         # 初期表示の更新
         self.update_visualization()
+
+    def run_reconstruction(self):
+        """Run reconstruction process"""
+        logger.info("Running reconstruction...")
+        # Reconstruction logic here
+        # For now, just update the visualization
+        self.update_visualization()
+        data = load_reconstruction(self.file_path)
+        if data is not None:
+            reply = QMessageBox.question(self, 'Confirmation', 'Reconstruction data found. Do you want to run the reconstruction?', QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply == QMessageBox.Yes:
+                # Proceed with reconstruction logic
+                logger.info("User confirmed to run reconstruction.")
+                # Add your reconstruction logic here
+                self.update_visualization()
+            else:
+                logger.info("User skipped the reconstruction.")
+        else:
+            logger.info("No reconstruction data found.")
 
     def update_visualization(self):
         """ポイントクラウドとカメラの可視化を更新"""
@@ -204,86 +228,3 @@ class PointCloudVisualizer(QWidget):
     def on_camera_image_tree_double_click(self, image_name):
         """ダブルクリックされた画像に関連付けられたカメラ位置に移動"""
         self.move_to_camera(image_name)
-
-class MainWindow(QWidget):
-    def __init__(self, file_path):
-        super().__init__()
-        self.setWindowTitle("Point Cloud Visualization")
-        self.setGeometry(100, 100, 1200, 800)
-
-        # Create splitter
-        splitter = QSplitter(Qt.Horizontal)
-
-        # Left side: organize images by camera name
-        self.image_tree = QTreeWidget()
-        self.image_tree.setHeaderLabel("Cameras")
-        self.image_tree.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.image_tree.customContextMenuRequested.connect(self.open_context_menu)
-        self.image_tree.itemClicked.connect(self.on_image_click)
-        self.image_tree.itemDoubleClicked.connect(self.on_image_double_click)  # Connect double-click signal
-
-        # Instance of the point cloud visualizer
-        self.pointcloud_viewer = PointCloudVisualizer(file_path)
-
-        # Layout settings
-        splitter.addWidget(self.image_tree)
-        splitter.addWidget(self.pointcloud_viewer)
-        splitter.setSizes([200, 800])
-
-        layout = QVBoxLayout(self)
-        layout.addWidget(splitter)
-
-        # Load camera and image data from JSON file
-        self.load_camera_data(file_path)
-
-    def load_camera_data(self, file_path):
-        """Load camera and image data from JSON and populate tree."""
-        with open(file_path, 'r') as f:
-            data = json.load(f)
-
-        for item in data:
-            cameras = item.get("cameras", {})
-            shots = item.get("shots", {})
-
-            for camera_name, _ in cameras.items():
-                camera_item = QTreeWidgetItem(self.image_tree)
-                camera_item.setText(0, camera_name)
-
-                # Add images associated with each camera to the tree
-                for shot_name, shot_data in shots.items():
-                    if shot_data.get("camera") == camera_name:
-                        image_item = QTreeWidgetItem(camera_item)
-                        image_item.setText(0, shot_name)
-
-    def open_context_menu(self, position: QPoint):
-        """Show context menu on right-click, move to the camera position of the selected image."""
-        item = self.image_tree.itemAt(position)
-        if item and item.parent():
-            image_name = item.text(0)
-            menu = QMenu()
-            move_action = menu.addAction("Move to camera position")
-            action = menu.exec_(self.image_tree.mapToGlobal(position))
-            if action == move_action:
-                logger.info(f"Context menu: Move to camera position for image '{image_name}'")
-                self.pointcloud_viewer.move_to_camera(image_name)
-
-    def on_image_click(self, item):
-        """Highlight the camera associated with the clicked image."""
-        if item.parent():
-            image_name = item.text(0)
-            logger.info(f"Image clicked: Highlight camera {image_name}")
-            self.pointcloud_viewer.highlight_camera(image_name)
-
-    def on_image_double_click(self, item):
-        """Move to the camera position associated with the double-clicked image."""
-        if item.parent():  # Check if the item is an image (not a camera)
-            image_name = item.text(0)
-            logger.info(f"Image double-clicked: Move to camera position for image '{image_name}'")
-            self.pointcloud_viewer.move_to_camera(image_name)
-
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    file_path = "path/to/your/reconstruction.json"  # JSONファイルのパスを設定
-    window = MainWindow(file_path)
-    window.show()
-    sys.exit(app.exec_())
