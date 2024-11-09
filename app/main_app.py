@@ -11,6 +11,7 @@ from PyQt5.QtCore import Qt, QTimer
 from opensfm.dataset import DataSet
 from app.mask_manager import MaskManager  # Import the updated MaskManager class
 from app.feature_extractor import FeatureExtractor  # 新しく追加
+from app.feature_matching import FeatureMatching  # 新しく追加
 from app.point_cloud_visualizer import PointCloudVisualizer  # Import the PointCloudVisualizer class
 class StartDialog(QDialog):
     """Dialog to offer options at startup."""
@@ -67,6 +68,8 @@ class MainApp(QMainWindow):
         self.workdir = None
         self.masks_tab_initialized = False  # Flag to check if Masks tab is initialized
         self.features_tab_initialized = False
+        self.matching_tab_initialized = False
+
         self.feature_extractor = None  # FeatureExtractor インスタンスを格納
         self.reconstruct_tab_initialized = False
 
@@ -213,6 +216,38 @@ class MainApp(QMainWindow):
         # Connect signals
         self.camera_image_tree.itemClicked.connect(self.display_features_for_image)
 
+    def init_matching_tab(self):
+        """Initialize the Matching tab."""
+        layout = QSplitter(Qt.Horizontal)
+
+        # 左側の画像リスト (列1)
+        self.camera_image_tree_left = QTreeWidget()
+        self.camera_image_tree_left.setHeaderLabel("Cameras and Images - Left")
+        self.camera_image_tree_left.setFixedWidth(250)  # 固定幅を設定
+        layout.addWidget(self.camera_image_tree_left)
+
+        # 右側の画像リスト (列2)
+        self.camera_image_tree_right = QTreeWidget()
+        self.camera_image_tree_right.setHeaderLabel("Cameras and Images - Right")
+        self.camera_image_tree_right.setFixedWidth(250)  # 固定幅を設定
+        layout.addWidget(self.camera_image_tree_right)
+
+        # 中央にMatchingTabウィジェットを追加
+        self.matching_viewer = FeatureMatching(workdir=self.workdir, image_list=self.image_list)
+        layout.addWidget(self.matching_viewer)
+
+        # Matchingタブ用のレイアウトを設定
+        self.matching_tab.setLayout(QVBoxLayout())
+        self.matching_tab.layout().addWidget(layout)
+
+        # 各リストにカメラデータを追加
+        self.populate_tree_with_camera_data(self.camera_image_tree_left)
+        self.populate_tree_with_camera_data(self.camera_image_tree_right)
+
+        # Connect signals for image selection
+        self.camera_image_tree_left.itemClicked.connect(self.on_image_selected_left)
+        self.camera_image_tree_right.itemClicked.connect(self.on_image_selected_right)
+
 
     def init_reconstruct_tab(self):
         """Initialize the Reconstruct tab."""
@@ -253,6 +288,8 @@ class MainApp(QMainWindow):
             if self.mask_manager is not None:
                 self.mask_manager.unload_sam_model()
 
+
+
         if tab_name == "Reconstruct":
             if not self.reconstruct_tab_initialized:
                 self.init_reconstruct_tab()
@@ -266,7 +303,11 @@ class MainApp(QMainWindow):
                 self.init_features_tab()  # Featuresタブの初期化メソッドを呼び出す
                 self.features_tab_initialized = True
 
-        
+        elif tab_name == "Matching":
+            # Featureタブの初期化処理
+            if not self.matching_tab_initialized:
+                self.init_matching_tab()  # Featuresタブの初期化メソッドを呼び出す
+                self.matching_tab_initialized = True
 
     def show_start_dialog(self):
         """Display a dialog to select an option at startup."""
@@ -456,7 +497,17 @@ class MainApp(QMainWindow):
             image_name = item.text(0)
             self.pointcloud_viewer.on_camera_image_tree_double_click(image_name)
 
+    def on_image_selected_left(self, item, column):
+        """Handle image selection in the left camera tree."""
+        if item.parent():  # 画像が選択された場合
+            image_name = item.text(0)
+            self.matching_viewer.load_image_by_name(image_name, position="left")
 
+    def on_image_selected_right(self, item, column):
+        """Handle image selection in the right camera tree."""
+        if item.parent():  # 画像が選択された場合
+            image_name = item.text(0)
+            self.matching_viewer.load_image_by_name(image_name, position="right")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
