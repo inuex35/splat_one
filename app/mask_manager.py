@@ -25,16 +25,13 @@ class ClickableImageLabel(QLabel):
         super().mousePressEvent(event)
 
 class MaskManager(QWidget):
-    def __init__(self, checkpoint_path, config_path, mask_dir, img_dir):
+    def __init__(self, checkpoint_path, config_path, mask_dir, img_dir, image_list):
         super().__init__()
         self.checkpoint_path = checkpoint_path
         self.config_path = config_path
         self.mask_dir = mask_dir
         self.img_dir = img_dir
-        self.image_list = [
-            f for f in sorted(os.listdir(self.img_dir))
-            if f.lower().endswith(('.png', '.jpg', '.jpeg'))
-        ]
+        self.image_list = image_list
         self.current_index = 0
         self.current_image = None
         self.current_mask = None
@@ -118,6 +115,14 @@ class MaskManager(QWidget):
             self.display_image_with_mask()
         else:
             QMessageBox.warning(self, "Error", "No images to display.")
+
+    def load_image_by_name(self, image_name):
+        """Load and display the image specified by image_name."""
+        if image_name in self.image_list:
+            self.current_index = self.image_list.index(image_name)
+            self.load_current_image()
+        else:
+            QMessageBox.warning(self, "Error", f"Image {image_name} not found in the image list.")
 
     def display_image(self, image):
         """Display the given image in the QLabel."""
@@ -292,3 +297,11 @@ class MaskManager(QWidget):
         if self.current_index > 0:
             self.current_index -= 1
             self.load_current_image()
+
+def release_resources(self):
+    """Release GPU resources by deleting the model and clearing cache."""
+    if self.sam_model is not None:
+        del self.sam_model
+        del self.predictor
+        torch.cuda.empty_cache()  # Free up GPU memory
+        guru.info("SAM2 model and predictor released, GPU memory cleared.")
