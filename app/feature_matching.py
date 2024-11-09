@@ -4,9 +4,8 @@ import numpy as np
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QMessageBox
 from PyQt5.QtGui import QPixmap, QImage
 from PyQt5.QtCore import Qt
-from opensfm import dataset
-from opensfm.actions import match_features
-from opensfm import matching
+from opensfm import dataset, features
+from itertools import combinations
 
 class FeatureMatching(QWidget):
     def __init__(self, workdir, image_list):
@@ -16,109 +15,192 @@ class FeatureMatching(QWidget):
         self.dataset = dataset.DataSet(workdir)
         self.current_image_left = None
         self.current_image_right = None
+        self.current_image_name_left = None
+        self.current_image_name_right = None
 
         # UI のセットアップ
         layout = QVBoxLayout()
-
-        # 上部に空間を追加して中央に配置
-        layout.addStretch(1)
-
-        # 左右の画像表示用ラベルを追加
         image_layout = QHBoxLayout()
-        self.display_label_left = QLabel("Left Image")
-        self.display_label_left.setAlignment(Qt.AlignCenter)
-        self.display_label_left.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        image_layout.addWidget(self.display_label_left)
 
-        self.display_label_right = QLabel("Right Image")
-        self.display_label_right.setAlignment(Qt.AlignCenter)
-        self.display_label_right.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        image_layout.addWidget(self.display_label_right)
+        # 左画像の2つのラベル
+        left_image_layout = QVBoxLayout()
+        self.left_image_labels = self.create_image_viewer("Left Image")
+        for label in self.left_image_labels[:2]:
+            left_image_layout.addWidget(label)
+        image_layout.addLayout(left_image_layout)
+
+        # 右画像の2つのラベル
+        right_image_layout = QVBoxLayout()
+        self.right_image_labels = self.create_image_viewer("Right Image")
+        for label in self.right_image_labels[:2]:
+            right_image_layout.addWidget(label)
+        image_layout.addLayout(right_image_layout)
 
         layout.addLayout(image_layout)
 
-        # 下部に空間を追加して中央に配置
-        layout.addStretch(1)
+        # 最下段：マッチング結果表示用ラベル
+        self.matching_label = QLabel("Matching Image")
+        self.matching_label.setAlignment(Qt.AlignCenter)
+        self.matching_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        layout.addWidget(self.matching_label)
 
-        button_layout = QHBoxLayout()
-
-        # Previous Image Button
+        # マッチング実行ボタン
         self.match_button = QPushButton("Match Features")
         self.match_button.clicked.connect(self.run_match_features)
-        button_layout.addWidget(self.match_button)
-
-        # Reset Mask Button
-        self.config_button = QPushButton("Config")
-        self.config_button.clicked.connect(self.configure_matching)
-        button_layout.addWidget(self.config_button)
-        layout.addLayout(button_layout)
+        layout.addWidget(self.match_button)
 
         self.setLayout(layout)
 
+    def create_image_viewer(self, title):
+        """画像、特徴点を表示する2つのラベルを返す"""
+        labels = []
+        for _ in range(2):
+            label = QLabel(title)
+            label.setAlignment(Qt.AlignCenter)
+            label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            labels.append(label)
+        return labels
+
     def resizeEvent(self, event):
         """リサイズイベントを処理し、表示中の画像を QLabel のサイズに合わせて調整します。"""
-        if self.current_image_left is not None:
-            self.set_image_to_label(self.current_image_left, position="left")
-        if self.current_image_right is not None:
-            self.set_image_to_label(self.current_image_right, position="right")
+        self.update_image_display("left")
+        self.update_image_display("right")
 
     def load_image_by_name(self, image_name, position="left"):
-        """指定された画像を読み込み、左右どちらかの位置に表示します。"""
+        """指定された画像を読み込み、左右どちらかの位置に表示し、特徴点とマッチングも更新します。"""
         image_path = os.path.join(self.workdir, "images", image_name)
         image = cv2.imread(image_path)
         if image is not None:
             rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             if position == "left":
                 self.current_image_left = rgb_image
-                self.set_image_to_label(rgb_image, position="left")
+                self.current_image_name_left = image_name
             elif position == "right":
                 self.current_image_right = rgb_image
-                self.set_image_to_label(rgb_image, position="right")
+                self.current_image_name_right = image_name
+            self.update_image_display(position)
+
+            # 特徴点とマッチングを更新
+            self.update_keypoints_and_matches()
         else:
             QMessageBox.warning(self, "Error", f"Image {image_name} not found.")
 
+    def update_keypoints_and_matches(self):
+        """左右の画像が両方選択されている場合、特徴点とマッチング画像を更新します。"""
+        if self.current_image_name_left and self.current_image_name_right:
+            features_left = self.dataset.load_features(self.current_image_name_left)
+            features_right = self.dataset.load_features(self.current_image_name_right)
+
+            if features_left is None or features_right is None:
+                QMessageBox.warning(self, "Error", "Feature data missing.")
+                return
+
+            h_l, w_l = self.current_image_left.shape[:2]
+            h_r, w_r = self.current_image_right.shape[:2]
+            pixels_left = features.denormalized_image_coordinates(features_left.points, w_l, h_l)
+            pixels_right = features.denormalized_image_coordinates(features_right.points, w_r, h_r)
+
+            # 特徴点の表示
+            self.plot_keypoints(pixels_left, "left")
+            self.plot_keypoints(pixels_right, "right")
+
+            # マッチングを取得
+            matches = self.dataset.find_matches(self.current_image_name_left, self.current_image_name_right)
+
+            if len(matches) > 0:
+                # マッチング結果のプロット
+                points_left = features_left.points[matches[:, 0]]
+                points_right = features_right.points[matches[:, 1]]
+                self.plot_matches(points_left, points_right)
+            else:
+                # マッチング結果がない場合はキーポイント画像を連結して表示
+                self.plot_combined_keypoints(pixels_left, pixels_right)
+
     def run_match_features(self):
-        """全画像での特徴点マッチングを実行します。"""
-        match_features.run_dataset(self.dataset)
-        QMessageBox.information(self, "Matching Completed", "Feature matching completed for all images.")
-
-    def configure_matching(self):
-        """Open the configuration dialog for feature extraction."""
-        QMessageBox.information(self, "Feature Extraction", "Feature extraction configuration dialog.")
-
-    def plot_matches(self, matches_data):
-        """左右の画像の特徴点マッチング結果をプロットし、表示します。"""
-        if self.current_image_left is None or self.current_image_right is None:
-            QMessageBox.warning(self, "Error", "Both left and right images must be loaded.")
+        """現在選択されている左右の画像に対して特徴点マッチングを実行し、結果を表示します。"""
+        if not self.current_image_name_left or not self.current_image_name_right:
+            QMessageBox.warning(self, "Error", "Both left and right images must be loaded for matching.")
             return
 
-        # 左右の画像のコピーを作成してマッチングラインを描画
-        img_left = self.current_image_left.copy()
-        img_right = self.current_image_right.copy()
+        # 特徴点とマッチングを更新
+        self.update_keypoints_and_matches()
 
-        for (x1, y1), (x2, y2) in matches_data:
-            cv2.circle(img_left, (int(x1), int(y1)), 5, (0, 255, 0), -1)
-            cv2.circle(img_right, (int(x2), int(y2)), 5, (255, 0, 0), -1)
+    def plot_keypoints(self, points, position):
+        """元画像に特徴点をプロットして表示"""
+        if position == "left" and self.current_image_left is not None:
+            image = self.current_image_left.copy()
+            for p in points:
+                center = (int(p[0]), int(p[1]))
+                cv2.circle(image, center, 5, (0, 255, 255), thickness=2, lineType=cv2.LINE_AA)
+            self.set_image_to_label(image, "keypoints", position)
+        elif position == "right" and self.current_image_right is not None:
+            image = self.current_image_right.copy()
+            for p in points:
+                center = (int(p[0]), int(p[1]))
+                cv2.circle(image, center, 5, (0, 255, 255), thickness=2, lineType=cv2.LINE_AA)
+            self.set_image_to_label(image, "keypoints", position)
 
-        # 描画後の画像をセット
-        self.set_image_to_label(img_left, position="left")
-        self.set_image_to_label(img_right, position="right")
+    def plot_matches(self, points_left, points_right):
+        """左右の画像の特徴点マッチング結果を1枚の画像にプロットして表示"""
+        h1, w1, _ = self.current_image_left.shape
+        h2, w2, _ = self.current_image_right.shape
+        output_image = np.zeros((max(h1, h2), w1 + w2, 3), dtype=np.uint8)
+        output_image[:h1, :w1] = self.current_image_left
+        output_image[:h2, w1:] = self.current_image_right
+        points_left = features.denormalized_image_coordinates(points_left, w1, h1)
+        points_right = features.denormalized_image_coordinates(points_right, w2, h2)
+        for (x1, y1), (x2, y2) in zip(points_left, points_right):
+            pt1 = (int(x1), int(y1))
+            pt2 = (int(x2) + w1, int(y2))  # 右画像はオフセットを加算
+            cv2.circle(output_image, pt1, 5, (0, 255, 255), thickness=2, lineType=cv2.LINE_AA)
+            cv2.circle(output_image, pt2, 5, (0, 255, 255), thickness=2, lineType=cv2.LINE_AA)
+            cv2.line(output_image, pt1, pt2, (255, 255, 0), 2)
 
-    def set_image_to_label(self, rgb_image, position="left"):
-        """QLabel に表示するため、画像をリサイズしてセットします。"""
-        label = self.display_label_left if position == "left" else self.display_label_right
+        self.set_image_to_label(output_image, "matches")
+
+    def plot_combined_keypoints(self, points_left, points_right):
+        """左右のキーポイント画像を連結して1つの画像に表示"""
+        h1, w1, _ = self.current_image_left.shape
+        h2, w2, _ = self.current_image_right.shape
+        combined_image = np.zeros((max(h1, h2), w1 + w2, 3), dtype=np.uint8)
+        left_image = self.current_image_left.copy()
+        right_image = self.current_image_right.copy()
+
+        for (x1, y1) in points_left:
+            cv2.circle(left_image, (int(x1), int(y1)), 5, (0, 255, 255), thickness=2, lineType=cv2.LINE_AA)
+        for (x2, y2) in points_right:
+            cv2.circle(right_image, (int(x2), int(y2)), 5, (0, 255, 255), thickness=2, lineType=cv2.LINE_AA)
+
+        combined_image[:h1, :w1] = left_image
+        combined_image[:h2, w1:] = right_image
+        self.set_image_to_label(combined_image, "matches")
+        
+    def set_image_to_label(self, rgb_image, label_type, position=None):
+        """指定された QLabel に画像をリサイズして表示"""
+        if label_type == "matches":
+            label = self.matching_label
+        else:
+            if position == "left":
+                label = self.left_image_labels[0] if label_type == "original" else self.left_image_labels[1]
+            else:
+                label = self.right_image_labels[0] if label_type == "original" else self.right_image_labels[1]
+
         label_width = label.width()
         h, w, _ = rgb_image.shape
         aspect_ratio = h / w
-
-        # QLabel の幅に合わせてリサイズ
         new_width = label_width
         new_height = int(new_width * aspect_ratio)
         resized_image = cv2.resize(rgb_image, (new_width, new_height), interpolation=cv2.INTER_AREA)
 
-        # QImage に変換して QLabel に設定
         height, width, channel = resized_image.shape
         bytes_per_line = channel * width
         q_image = QImage(resized_image.data, width, height, bytes_per_line, QImage.Format_RGB888)
         pixmap = QPixmap.fromImage(q_image)
         label.setPixmap(pixmap)
+
+    def update_image_display(self, position):
+        """画像表示を更新"""
+        if position == "left" and self.current_image_left is not None:
+            self.set_image_to_label(self.current_image_left, "original", "left")
+        elif position == "right" and self.current_image_right is not None:
+            self.set_image_to_label(self.current_image_right, "original", "right")
