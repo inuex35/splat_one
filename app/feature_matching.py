@@ -1,11 +1,122 @@
 import os
 import cv2
 import numpy as np
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QMessageBox
-from PyQt5.QtGui import QPixmap, QImage
+from PyQt5.QtWidgets import QWidget, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QSizePolicy, QCheckBox, QComboBox, QDialogButtonBox, QMessageBox
+from PyQt5.QtGui import QPixmap, QImage, QIntValidator, QDoubleValidator
 from PyQt5.QtCore import Qt
 from opensfm import dataset, features
 from itertools import combinations
+import yaml
+
+class MatchingConfigDialog(QDialog):
+    """特徴点マッチングの設定ダイアログ"""
+    def __init__(self, config_path, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Matching Configuration")
+        self.config_path = config_path
+
+        # 設定データを読み込む
+        with open(config_path, "r") as f:
+            self.config_data = yaml.safe_load(f)
+
+        # メインレイアウトの設定
+        self.main_layout = QVBoxLayout()
+        self.setLayout(self.main_layout)
+        self.fields = {}
+
+        # 基本的なマッチング設定
+        self.add_combobox_field("matching_type", ["Brute-Force", "FLANN", "LIGHTGLUE"], default="Brute-Force")
+        self.add_lineedit_field("distance_threshold", field_type=float, default_value=0.75)
+        self.add_checkbox_field("cross_check", default=False)
+
+        # GPS距離に基づく設定
+        self.add_lineedit_field("matching_gps_distance", field_type=int, default_value=150)
+        self.add_lineedit_field("matching_gps_neighbors", field_type=int, default_value=0)
+        
+        # 時間・名前ベースのマッチング設定
+        self.add_lineedit_field("matching_time_neighbors", field_type=int, default_value=0)
+        self.add_lineedit_field("matching_order_neighbors", field_type=int, default_value=0)
+        
+        # BoW（Bag of Words）ベースの設定
+        self.add_lineedit_field("matching_bow_neighbors", field_type=int, default_value=0)
+        self.add_lineedit_field("matching_bow_gps_distance", field_type=int, default_value=0)
+        self.add_lineedit_field("matching_bow_gps_neighbors", field_type=int, default_value=0)
+        self.add_checkbox_field("matching_bow_other_cameras", default=False)
+        
+        # VLADベースの設定
+        self.add_lineedit_field("matching_vlad_neighbors", field_type=int, default_value=0)
+        self.add_lineedit_field("matching_vlad_gps_distance", field_type=int, default_value=0)
+        self.add_lineedit_field("matching_vlad_gps_neighbors", field_type=int, default_value=0)
+        self.add_checkbox_field("matching_vlad_other_cameras", default=False)
+        
+        # その他のマッチング設定
+        self.add_lineedit_field("matching_graph_rounds", field_type=int, default_value=0)
+        self.add_checkbox_field("matching_use_filters", default=False)
+        self.add_combobox_field("matching_use_segmentation", ["no", "yes"], default="no")
+
+        # OK と Cancel ボタン
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.save_config)
+        button_box.rejected.connect(self.reject)
+        self.main_layout.addWidget(button_box)
+
+    def add_combobox_field(self, key, options, default=None):
+        """コンボボックスフィールドを追加"""
+        label = QLabel(key)
+        field = QComboBox()
+        field.addItems(options)
+        # 文字列型であることを確認して setCurrentText に渡す
+        value = self.config_data.get(key, default)
+        if not isinstance(value, str):
+            value = str(value) if value is not None else default
+        field.setCurrentText(value)
+        
+        row_layout = QHBoxLayout()
+        row_layout.addWidget(label)
+        row_layout.addWidget(field)
+        self.main_layout.addLayout(row_layout)
+        self.fields[key] = field
+
+    def add_lineedit_field(self, key, field_type=str, default_value=None):
+        """テキストフィールド（数値や文字列）を追加"""
+        label = QLabel(key)
+        field = QLineEdit(str(self.config_data.get(key, default_value)))
+        if field_type == int:
+            field.setValidator(QIntValidator())
+        elif field_type == float:
+            field.setValidator(QDoubleValidator())
+        row_layout = QHBoxLayout()
+        row_layout.addWidget(label)
+        row_layout.addWidget(field)
+        self.main_layout.addLayout(row_layout)
+        self.fields[key] = field
+
+    def add_checkbox_field(self, key, default=False):
+        """チェックボックスフィールドを追加"""
+        label = QLabel(key)
+        field = QCheckBox()
+        field.setChecked(self.config_data.get(key, default))
+        row_layout = QHBoxLayout()
+        row_layout.addWidget(label)
+        row_layout.addWidget(field)
+        self.main_layout.addLayout(row_layout)
+        self.fields[key] = field
+
+    def save_config(self):
+        """設定を保存してダイアログを閉じる"""
+        for key, field in self.fields.items():
+            if isinstance(field, QCheckBox):
+                self.config_data[key] = field.isChecked()
+            elif isinstance(field, QLineEdit):
+                text = field.text()
+                self.config_data[key] = float(text) if '.' in text else int(text) if text.isdigit() else text
+            elif isinstance(field, QComboBox):
+                self.config_data[key] = field.currentText()
+
+        with open(self.config_path, "w") as f:
+            yaml.safe_dump(self.config_data, f)
+        QMessageBox.information(self, "Config", "Configuration saved successfully.")
+        self.accept()
 
 class FeatureMatching(QWidget):
     def __init__(self, workdir, image_list):
@@ -13,6 +124,7 @@ class FeatureMatching(QWidget):
         self.workdir = workdir
         self.image_list = image_list
         self.dataset = dataset.DataSet(workdir)
+        self.config_path = os.path.join(workdir, "config.yaml")
         self.current_image_left = None
         self.current_image_right = None
         self.current_image_name_left = None
@@ -44,10 +156,18 @@ class FeatureMatching(QWidget):
         self.matching_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout.addWidget(self.matching_label)
 
+        button_layout = QHBoxLayout()
+
         # マッチング実行ボタン
         self.match_button = QPushButton("Match Features")
         self.match_button.clicked.connect(self.run_match_features)
-        layout.addWidget(self.match_button)
+        button_layout.addWidget(self.match_button)
+
+        # Reset Mask Button
+        self.config_button = QPushButton("Config")
+        self.config_button.clicked.connect(self.configure_matching)
+        button_layout.addWidget(self.config_button)
+        layout.addLayout(button_layout)
 
         self.setLayout(layout)
 
@@ -125,6 +245,14 @@ class FeatureMatching(QWidget):
         # 特徴点とマッチングを更新
         self.update_keypoints_and_matches()
 
+    def configure_matching(self):
+        """マッチング設定ダイアログを開く"""
+        dialog = MatchingConfigDialog(config_path=self.config_path, parent=self)
+        if dialog.exec_() == QDialog.Accepted:
+            QMessageBox.information(self, "Config", "Configuration saved successfully.")
+            # 設定が更新されたため、必要に応じて dataset を再読み込みするなどの処理
+            self.dataset = dataset.DataSet(self.workdir)
+
     def plot_keypoints(self, points, position):
         """元画像に特徴点をプロットして表示"""
         if position == "left" and self.current_image_left is not None:
@@ -154,7 +282,7 @@ class FeatureMatching(QWidget):
             pt2 = (int(x2) + w1, int(y2))  # 右画像はオフセットを加算
             cv2.circle(output_image, pt1, 5, (0, 255, 255), thickness=2, lineType=cv2.LINE_AA)
             cv2.circle(output_image, pt2, 5, (0, 255, 255), thickness=2, lineType=cv2.LINE_AA)
-            cv2.line(output_image, pt1, pt2, (255, 255, 0), 2)
+            cv2.line(output_image, pt1, pt2, (255, 255, 0), 1)
 
         self.set_image_to_label(output_image, "matches")
 

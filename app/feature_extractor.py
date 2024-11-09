@@ -9,12 +9,6 @@ from opensfm.actions import detect_features
 from opensfm import features
 import yaml
 
-import yaml
-from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QDialogButtonBox, 
-    QCheckBox, QComboBox, QLineEdit, QMessageBox, QSizePolicy
-)
-
 class ConfigDialog(QDialog):
     # 記憶する位置をクラス変数で保持
     dialog_position = None
