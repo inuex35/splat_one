@@ -72,7 +72,7 @@ class MainApp(QMainWindow):
         self.features_tab_initialized = False
         self.matching_tab_initialized = False
 
-        self.feature_extractor = None  # FeatureExtractor インスタンスを格納
+        self.feature_extractor = None  # Placeholder for FeatureExtractor instance
         self.reconstruct_tab_initialized = False
 
         # Set up tab widget
@@ -115,7 +115,7 @@ class MainApp(QMainWindow):
         # Left side: Tree of images grouped by camera
         self.camera_image_tree = QTreeWidget()
         self.camera_image_tree.setHeaderLabel("Cameras and Images")
-        self.camera_image_tree.setFixedWidth(250)  # 固定幅を設定
+        self.camera_image_tree.setFixedWidth(250)
         layout.addWidget(self.camera_image_tree)
 
         # Right side: Splitter with image viewer and EXIF display
@@ -153,7 +153,7 @@ class MainApp(QMainWindow):
         # Left side: Tree of images grouped by camera (like other tabs)
         self.camera_image_tree = QTreeWidget()
         self.camera_image_tree.setHeaderLabel("Cameras and Images")
-        self.camera_image_tree.setFixedWidth(250)  # 固定幅を設定
+        self.camera_image_tree.setFixedWidth(250)
         layout.addWidget(self.camera_image_tree)
 
         if self.workdir is None:
@@ -203,7 +203,7 @@ class MainApp(QMainWindow):
         # Left side: Tree of images grouped by camera
         self.camera_image_tree = QTreeWidget()
         self.camera_image_tree.setHeaderLabel("Cameras and Images")
-        self.camera_image_tree.setFixedWidth(250)  # 固定幅を設定
+        self.camera_image_tree.setFixedWidth(250)
         layout.addWidget(self.camera_image_tree)
 
         # Right side: FeatureExtractor widget
@@ -218,39 +218,69 @@ class MainApp(QMainWindow):
 
         # Connect signals
         self.camera_image_tree.itemClicked.connect(self.display_features_for_image)
-
     def init_matching_tab(self):
         """Initialize the Matching tab."""
         layout = QSplitter(Qt.Horizontal)
 
-        # 左側の画像リスト (列1)
+        # Left side: Tree of images (Column 1)
         self.camera_image_tree_left = QTreeWidget()
         self.camera_image_tree_left.setHeaderLabel("Cameras and Images - Left")
-        self.camera_image_tree_left.setFixedWidth(250)  # 固定幅を設定
+        self.camera_image_tree_left.setFixedWidth(250)
         layout.addWidget(self.camera_image_tree_left)
 
-        # 右側の画像リスト (列2)
+        # Right side: Tree of images (Column 2)
         self.camera_image_tree_right = QTreeWidget()
         self.camera_image_tree_right.setHeaderLabel("Cameras and Images - Right")
-        self.camera_image_tree_right.setFixedWidth(250)  # 固定幅を設定
+        self.camera_image_tree_right.setFixedWidth(250)
         layout.addWidget(self.camera_image_tree_right)
 
-        # 中央にMatchingTabウィジェットを追加
+        # Center: Add MatchingTab widget
         self.matching_viewer = FeatureMatching(workdir=self.workdir, image_list=self.image_list)
         layout.addWidget(self.matching_viewer)
 
-        # Matchingタブ用のレイアウトを設定
+        # Set layout for matching tab
         self.matching_tab.setLayout(QVBoxLayout())
         self.matching_tab.layout().addWidget(layout)
 
-        # 各リストにカメラデータを追加
+        # Populate each tree with camera data
         self.populate_tree_with_camera_data(self.camera_image_tree_left)
         self.populate_tree_with_camera_data(self.camera_image_tree_right)
 
         # Connect signals for image selection
         self.camera_image_tree_left.itemClicked.connect(self.on_image_selected_left)
         self.camera_image_tree_right.itemClicked.connect(self.on_image_selected_right)
+    
+    def init_matching_tab(self):
+        """Initialize the Matching tab."""
+        layout = QSplitter(Qt.Horizontal)
 
+        # Left side: Tree of images (Column 1)
+        self.camera_image_tree_left = QTreeWidget()
+        self.camera_image_tree_left.setHeaderLabel("Cameras and Images - Left")
+        self.camera_image_tree_left.setFixedWidth(250)  # Set fixed width
+        layout.addWidget(self.camera_image_tree_left)
+
+        # Right side: Tree of images (Column 2)
+        self.camera_image_tree_right = QTreeWidget()
+        self.camera_image_tree_right.setHeaderLabel("Cameras and Images - Right")
+        self.camera_image_tree_right.setFixedWidth(250)  # Set fixed width
+        layout.addWidget(self.camera_image_tree_right)
+
+        # Center: Add MatchingTab widget
+        self.matching_viewer = FeatureMatching(workdir=self.workdir, image_list=self.image_list)
+        layout.addWidget(self.matching_viewer)
+
+        # Set layout for matching tab
+        self.matching_tab.setLayout(QVBoxLayout())
+        self.matching_tab.layout().addWidget(layout)
+
+        # Populate each tree with camera data
+        self.populate_tree_with_camera_data(self.camera_image_tree_left)
+        self.populate_tree_with_camera_data(self.camera_image_tree_right)
+
+        # Connect signals for image selection
+        self.camera_image_tree_left.itemClicked.connect(self.on_image_selected_left)
+        self.camera_image_tree_right.itemClicked.connect(self.on_image_selected_right)
 
     def init_reconstruct_tab(self):
         """Initialize the Reconstruct tab."""
@@ -259,7 +289,7 @@ class MainApp(QMainWindow):
         # Left side: Tree of images grouped by camera
         self.camera_image_tree = QTreeWidget()
         self.camera_image_tree.setHeaderLabel("Cameras and Images")
-        self.camera_image_tree.setFixedWidth(250)  # 固定幅を設定
+        self.camera_image_tree.setFixedWidth(250)
         layout.addWidget(self.camera_image_tree)
 
         # Right side: PointCloudVisualizer widget
@@ -303,13 +333,13 @@ class MainApp(QMainWindow):
         elif tab_name == "Features":
             # Featureタブの初期化処理
             if not self.features_tab_initialized:
-                self.init_features_tab()  # Featuresタブの初期化メソッドを呼び出す
+                self.init_features_tab()
                 self.features_tab_initialized = True
 
         elif tab_name == "Matching":
             # Featureタブの初期化処理
             if not self.matching_tab_initialized:
-                self.init_matching_tab()  # Featuresタブの初期化メソッドを呼び出す
+                self.init_matching_tab()
                 self.matching_tab_initialized = True
 
     def show_start_dialog(self):
@@ -370,7 +400,6 @@ class MainApp(QMainWindow):
             ]
 
             if self.image_list:
-                # 再表示: imagesタブ用のimages_treeにデータを再設定
                 self.populate_tree_with_camera_data(self.camera_image_tree)
                 QMessageBox.information(self, "Success", "Workdir loaded successfully.")
             else:
@@ -483,35 +512,33 @@ class MainApp(QMainWindow):
 
     def display_features_for_image(self, item, column):
         """Display features for the selected image."""
-        # 画像名を取得
-        image_name = item.text(0)  # 修正: 列を指定
+        image_name = item.text(0)
         if self.feature_extractor:
-            # FeatureExtractorで選択された画像をロードして特徴を抽出
             self.feature_extractor.load_image_by_name(image_name)
         else:
             QMessageBox.warning(self, "Error", "Feature extractor is not initialized.")
 
     def handle_camera_image_tree_click(self, item, column):
         """Handle single click event for camera_image_tree and pass image name to PointCloudVisualizer."""
-        if item.childCount() == 0 and item.parent() is not None:  # 画像項目のみ反応
+        if item.childCount() == 0 and item.parent() is not None:
             image_name = item.text(0)
             self.reconstruction_viewer.on_camera_image_tree_click(image_name)
 
     def handle_camera_image_tree_double_click(self, item, column):
         """Handle double click event for camera_image_tree and move to the camera position."""
-        if item.childCount() == 0 and item.parent() is not None:  # 画像項目のみ反応
+        if item.childCount() == 0 and item.parent() is not None:
             image_name = item.text(0)
             self.reconstruction_viewer.on_camera_image_tree_double_click(image_name)
 
     def on_image_selected_left(self, item, column):
         """Handle image selection in the left camera tree."""
-        if item.parent():  # 画像が選択された場合
+        if item.parent():
             image_name = item.text(0)
             self.matching_viewer.load_image_by_name(image_name, position="left")
 
     def on_image_selected_right(self, item, column):
         """Handle image selection in the right camera tree."""
-        if item.parent():  # 画像が選択された場合
+        if item.parent():
             image_name = item.text(0)
             self.matching_viewer.load_image_by_name(image_name, position="right")
 

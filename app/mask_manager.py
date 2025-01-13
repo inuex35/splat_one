@@ -45,8 +45,11 @@ class MaskManager(QWidget):
         self.init_ui()
         # Initialize SAM2 model and predictor
         self.init_sam_model()
-        # Load the first image
-        self.load_current_image()
+
+        # Point: Initially, do not load the image, display text instead
+        # self.load_current_image()  # ← Comment this out
+        self.image_label.setText("Select an image to view masks.")
+        self.image_label.setStyleSheet("color: gray; font-size: 16px;")  # Styling for better visibility
 
     def init_ui(self):
         """Initialize the UI components."""
@@ -103,12 +106,17 @@ class MaskManager(QWidget):
 
     def load_current_image(self):
         """Load and display the current image."""
+        # If the image list is empty, display a message and exit
+        if not self.image_list:
+            self.image_label.setText("Select an image to view masks.")
+            return
+
         self.input_points = []
         self.input_labels = []
         self.label_toggle = 1  # Reset label toggle
         self.current_mask = None
 
-        if self.image_list and 0 <= self.current_index < len(self.image_list):
+        if 0 <= self.current_index < len(self.image_list):
             self.image_name = self.image_list[self.current_index]
             self.load_image_by_name(self.image_name)
         else:
@@ -165,6 +173,9 @@ class MaskManager(QWidget):
     def set_image_to_label(self, rgb_image):
         """Resize the image to fit the QLabel width while maintaining aspect ratio and display it."""
         label_width = self.image_label.width()
+        if label_width == 0:
+            label_width = 400
+
         h, w, _ = rgb_image.shape
         aspect_ratio = h / w  # Calculate aspect ratio
 
@@ -182,6 +193,8 @@ class MaskManager(QWidget):
         pixmap = QPixmap.fromImage(q_image)
         
         self.image_label.setPixmap(pixmap)
+        # Clear the text to remove any previous text
+        self.image_label.setText("")
 
     def on_image_clicked(self, event):
         """Handle image click events with position correction."""
@@ -212,6 +225,7 @@ class MaskManager(QWidget):
                 self.input_points.append([corrected_x, corrected_y])
                 self.input_labels.append(self.label_toggle)
 
+                # Toggle the label for the next point (1→0, 0→1)
                 self.label_toggle = 1 - self.label_toggle
                 self.generate_mask()
 
@@ -302,9 +316,13 @@ class MaskManager(QWidget):
         if self.current_index < len(self.image_list) - 1:
             self.current_index += 1
             self.load_current_image()
+        else:
+            QMessageBox.information(self, "Info", "This is the last image.")
 
     def prev_image(self):
         """Move to the previous image."""
         if self.current_index > 0:
             self.current_index -= 1
             self.load_current_image()
+        else:
+            QMessageBox.information(self, "Info", "This is the first image.")

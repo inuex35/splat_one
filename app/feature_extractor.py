@@ -1,7 +1,20 @@
 import os
 import cv2
 import numpy as np
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QMessageBox, QDialog, QLineEdit, QDialogButtonBox, QCheckBox, QComboBox
+from PyQt5.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QSizePolicy,
+    QMessageBox,
+    QDialog,
+    QLineEdit,
+    QDialogButtonBox,
+    QCheckBox,
+    QComboBox
+)
 from PyQt5.QtGui import QPixmap, QImage, QIntValidator, QDoubleValidator
 from PyQt5.QtCore import Qt
 from opensfm import dataset
@@ -9,15 +22,16 @@ from opensfm.actions import detect_features
 from opensfm import features
 import yaml
 
+
 class ConfigDialog(QDialog):
-    # 記憶する位置をクラス変数で保持
+    # Store the remembered position as a class variable
     dialog_position = None
 
     def __init__(self, config_path, feature_type=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Feature Extraction Configuration")
         self.config_path = config_path
-        self.feature_type = feature_type  # 初期選択の特徴点タイプ
+        self.feature_type = feature_type  # Initial selected feature type
 
         # Load config data
         with open(config_path, "r") as f:
@@ -42,7 +56,7 @@ class ConfigDialog(QDialog):
         button_box.rejected.connect(self.reject)
         self.main_layout.addWidget(button_box)
 
-        # ウィンドウの位置を設定
+        # Set the window position
         self.set_dialog_position()
 
     def set_feature_type_field(self):
@@ -77,16 +91,18 @@ class ConfigDialog(QDialog):
 
     def on_feature_type_change(self, new_feature_type):
         """Handle feature type change by closing and reopening the dialog with new settings."""
-        # 現在の位置を保存
+        # Save the current position
         ConfigDialog.dialog_position = self.pos()
         
-        # 新しい特徴点タイプに基づいてダイアログを再生成
+        # Recreate the dialog based on the new feature type
         self.close()
         new_dialog = ConfigDialog(self.config_path, feature_type=new_feature_type, parent=self.parent())
         new_dialog.exec_()
 
     def set_dialog_position(self):
-        """記憶した位置にダイアログを開く。位置が未設定ならデフォルト位置で開く。"""
+        """
+        Opens the dialog at the remembered position. If the position is not set, opens at the default position.
+        """
         if ConfigDialog.dialog_position:
             self.move(ConfigDialog.dialog_position)
 
@@ -179,8 +195,17 @@ class ConfigDialog(QDialog):
             if isinstance(field, QCheckBox):
                 self.config_data[key] = field.isChecked()
             elif isinstance(field, QLineEdit):
-                text = field.text()
-                self.config_data[key] = int(text) if text.isdigit() else float(text) if '.' in text else text
+                text = field.text().strip()
+                # Convert to number if possible
+                if text.replace('.', '', 1).isdigit():
+                    # Convert to float if it contains a decimal point, otherwise to int
+                    if '.' in text:
+                        self.config_data[key] = float(text)
+                    else:
+                        self.config_data[key] = int(text)
+                else:
+                    # Treat as string if not a number
+                    self.config_data[key] = text
             elif isinstance(field, QComboBox):
                 self.config_data[key] = field.currentText()
 
@@ -189,53 +214,65 @@ class ConfigDialog(QDialog):
         QMessageBox.information(self, "Config", "Configuration saved successfully.")
         self.accept()
 
+
 class FeatureExtractor(QWidget):
     def __init__(self, workdir, image_list):
         super().__init__()
         self.workdir = workdir
         self.image_list = image_list
         self.dataset = dataset.DataSet(workdir)
-        self.current_image = None  # 現在の画像データを保持する変数
+        self.current_image = None  # Variable to hold the current image data
         self.config_path = os.path.join(workdir, "config.yaml")
         self.config_data = self.load_config_data(self.config_path)
 
-        # UI setup with a vertical layout
+        # --- UI setup with a vertical layout ---
         layout = QVBoxLayout()
 
-        # 上部に空間を追加して中央に配置
+        # Add space above and below to center the content
         layout.addStretch(1)
 
-        # Display label for feature visualization, centered vertically
+        # 1) Initially display "Select an image to view features." (do not auto-load)
         self.display_label = QLabel("Select an image to view features.")
+        self.display_label.setStyleSheet("color: gray; font-size: 16px;")  # Example to make it more visible
         self.display_label.setAlignment(Qt.AlignCenter)
         self.display_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout.addWidget(self.display_label, alignment=Qt.AlignVCenter)
 
-        # 下部に空間を追加して中央に配置
         layout.addStretch(1)
 
+        # --- Bottom button layout ---
         button_layout = QHBoxLayout()
 
-        # Previous Image Button
+        # Extract Features Button
         self.extract_button = QPushButton("Extract Features")
         self.extract_button.clicked.connect(self.run_detect_features)
         button_layout.addWidget(self.extract_button)
 
-        # Reset Mask Button
+        # Config Button
         self.config_button = QPushButton("Config")
         self.config_button.clicked.connect(self.configure_features)
         button_layout.addWidget(self.config_button)
-        layout.addLayout(button_layout)
 
+        layout.addLayout(button_layout)
         self.setLayout(layout)
 
     def resizeEvent(self, event):
         """Handle the resize event to adjust the image size to fit the QLabel area."""
         if self.current_image is not None:
-            self.set_image_to_label(self.current_image)  # 現在の画像をリサイズして再表示
+            self.set_image_to_label(self.current_image)  # Resize and redisplay the current image
 
     def load_image_by_name(self, image_name):
-        """Load an image by name, and display features if available, or show the original image."""
+        """
+        Called when the user selects an image.
+        1) Display features if available
+        2) Otherwise, display the original image
+        """
+        # Display "Image not found." if the image does not exist
+        image_path = os.path.join(self.workdir, "images", image_name)
+        if not os.path.exists(image_path):
+            self.display_label.setText("Image not found.")
+            return
+
         try:
             features_data = self.dataset.load_features(image_name)
             self.plot_features(image_name, features_data)
@@ -250,9 +287,14 @@ class FeatureExtractor(QWidget):
     def configure_features(self):
         """Open the configuration dialog for feature extraction."""
         config_path = os.path.join(self.workdir, "config.yaml")
-        dialog = ConfigDialog(config_path=config_path, feature_type=self.config_data.get("feature_type", "AKAZE"), parent=self)
+        dialog = ConfigDialog(
+            config_path=config_path,
+            feature_type=self.config_data.get("feature_type", "AKAZE"),
+            parent=self
+        )
         if dialog.exec_() == QDialog.Accepted:
             QMessageBox.information(self, "Config", "Configuration saved successfully.")
+            # Recreate the dataset as the config has been updated
             self.dataset = dataset.DataSet(self.workdir)
 
     def show_original_image(self, image_name):
@@ -261,7 +303,7 @@ class FeatureExtractor(QWidget):
         image = cv2.imread(image_path)
         if image is not None:
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)  # Convert BGR to RGB
-            self.current_image = image  # 現在の画像を保持
+            self.current_image = image  # Hold the current image
             self.set_image_to_label(image)
         else:
             self.display_label.setText("Image not found.")
@@ -270,29 +312,40 @@ class FeatureExtractor(QWidget):
         """Use OpenCV to plot features of the selected image and display in QLabel."""
         # Load image
         image = self.dataset.load_image(image_name)
+        if image is None:
+            self.display_label.setText("Image not found.")
+            return
+
+        # Draw features
         h, w, _ = image.shape
         pixels = features.denormalized_image_coordinates(features_data.points, w, h)
-        fixed_size = 5  # 円の固定半径
+        fixed_size = 5  # Fixed radius for circles
 
         for p in pixels:
             center = (int(p[0]), int(p[1]))
-            cv2.circle(image, center, fixed_size, (0, 255, 255), thickness=2, lineType=cv2.LINE_AA)  # Yellow circles
+            cv2.circle(image, center, fixed_size, (0, 255, 255), thickness=2, lineType=cv2.LINE_AA)
 
-        # 現在の画像を保持し、ラベルに設定
+        # Hold the current image and set it to the label
         self.current_image = image  
         self.set_image_to_label(image)
 
     def set_image_to_label(self, rgb_image):
-        """Resize the image to fit the QLabel width while maintaining aspect ratio and display it."""
+        """
+        Resize the image to fit the QLabel width while maintaining aspect ratio 
+        and display it.
+        """
         label_width = self.display_label.width()
-        h, w, _ = rgb_image.shape
-        aspect_ratio = h / w  # アスペクト比を計算
+        # Use a provisional value if the label width is 0 (window not displayed)
+        if label_width == 0:
+            label_width = 400
 
-        # 横幅を QLabel の幅に合わせ、アスペクト比を維持した高さを計算
+        h, w, _ = rgb_image.shape
+        aspect_ratio = h / w
+
         new_width = label_width
         new_height = int(new_width * aspect_ratio)
 
-        # 画像をリサイズ
+        # Resize the image
         resized_image = cv2.resize(rgb_image, (new_width, new_height), interpolation=cv2.INTER_AREA)
         
         # Convert to QPixmap and set to QLabel
@@ -302,10 +355,11 @@ class FeatureExtractor(QWidget):
         pixmap = QPixmap.fromImage(q_image)
 
         self.display_label.setPixmap(pixmap)
+        # Clear any text that was displayed
+        self.display_label.setText("")
 
     def load_config_data(self, config_path):
         """Load configuration data from a YAML file."""
-        import yaml
         if os.path.exists(config_path):
             with open(config_path, 'r') as f:
                 return yaml.safe_load(f)
