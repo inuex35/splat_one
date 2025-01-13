@@ -260,6 +260,7 @@ class FeatureExtractor(QWidget):
         image_path = os.path.join(self.workdir, "images", image_name)
         image = cv2.imread(image_path)
         if image is not None:
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)  # Convert BGR to RGB
             self.current_image = image  # 現在の画像を保持
             self.set_image_to_label(image)
         else:

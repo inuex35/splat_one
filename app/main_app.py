@@ -3,6 +3,7 @@ import sys
 import os
 import json
 import shutil
+import importlib.util
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QToolBar, QAction, QFileDialog, QMessageBox,
     QDialog, QVBoxLayout, QPushButton, QLabel, QWidget, QTabWidget, QSplitter,
@@ -161,8 +162,9 @@ class MainApp(QMainWindow):
 
         if self.mask_manager is None:
             # Initialize MaskManager
-            checkpoint_path = "checkpoints/sam2.1_hiera_large.pt"
-            config_path = "configs/sam2.1/sam2.1_hiera_l.yaml"
+            sam2_dir = self.get_sam2_directory()
+            checkpoint_path = os.path.join(sam2_dir, "checkpoints", "sam2.1_hiera_large.pt")
+            config_path = os.path.join("configs", "sam2.1", "sam2.1_hiera_l.yaml")
             mask_dir = os.path.join(self.workdir, "masks")
             img_dir = os.path.join(self.workdir, "images")
             if not self.image_list:
@@ -512,6 +514,16 @@ class MainApp(QMainWindow):
         if item.parent():  # 画像が選択された場合
             image_name = item.text(0)
             self.matching_viewer.load_image_by_name(image_name, position="right")
+
+    def get_sam2_directory(self):
+        """
+        get sam2 install directory
+        """
+        module_name = 'sam2'
+        spec = importlib.util.find_spec(module_name)
+        if spec is None:
+            raise ModuleNotFoundError(f"{module_name} is not installed.")
+        return os.path.dirname(os.path.dirname(spec.origin))
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
