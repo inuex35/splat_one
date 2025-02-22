@@ -147,8 +147,7 @@ RUN git clone --depth 1 https://github.com/cvg/LightGlue.git /LightGlue && \
 # Clone splat_one リポジトリも浅いクローンに変更し、サブモジュールも更新後に不要な .git を削除
 RUN git clone --depth 1 https://github.com/inuex35/splat_one.git /source/splat_one && \
     cd /source/splat_one && \
-    git submodule update --init --recursive && \
-    rm -rf .git
+    git submodule update --init --recursive
 
 # OpenSfM のビルドとインストール（ビルド後にキャッシュ削除）
 RUN cd /source/splat_one/submodules/opensfm && \
