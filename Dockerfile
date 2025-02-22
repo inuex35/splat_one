@@ -132,7 +132,7 @@ RUN pip install --no-cache-dir git+https://github.com/rmbrualla/pycolmap@cc7ea4b
 
 # Clone and install FlashAttention with shallow clone and remove .git afterwards
 RUN git clone --depth 1 https://github.com/Dao-AILab/flash-attention.git /flash-attention && \
-    cd /flash-attention && git checkout 6d48e14a6c2f551db96f0badc658a6279a929df3 && \
+    cd /flash-attention && \
     pip install --no-cache-dir . && \
     rm -rf /flash-attention/.git
 
