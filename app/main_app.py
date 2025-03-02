@@ -15,6 +15,102 @@ from app.mask_manager import MaskManager  # Import the updated MaskManager class
 from app.feature_extractor import FeatureExtractor  # 新しく追加
 from app.feature_matching import FeatureMatching  # 新しく追加
 from app.point_cloud_visualizer import Reconstruction  # Import the PointCloudVisualizer class
+
+
+class CameraModelEditor(QDialog):
+    """カメラモデル編集ダイアログ"""
+    def __init__(self, camera_models, workdir, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Edit Camera Models")
+        self.setFixedSize(600, 400)
+
+        self.camera_models = camera_models
+        self.workdir = workdir
+
+        layout = QVBoxLayout()
+        self.table = QTableWidget()
+        self.table.setColumnCount(3)
+        self.table.setHorizontalHeaderLabels(["Key", "Parameter", "Value"])
+        self.load_camera_models()
+        layout.addWidget(self.table)
+
+        save_button = QPushButton("Save Changes")
+        save_button.clicked.connect(self.save_changes)
+        layout.addWidget(save_button)
+
+        self.setLayout(layout)
+
+    def load_camera_models(self):
+        """カメラモデルをテーブルにロードする"""
+        self.table.setRowCount(0)
+        row = 0
+        for key, params in self.camera_models.items():
+            for param, value in params.items():
+                self.table.insertRow(row)
+                self.table.setItem(row, 0, QTableWidgetItem(key))
+                self.table.setItem(row, 1, QTableWidgetItem(param))
+                self.table.setItem(row, 2, QTableWidgetItem(str(value)))
+                row += 1
+
+    def save_changes(self):
+        """カメラモデルの変更を camera_models_overrides.json に保存"""
+        updated_models = {}
+
+        for row in range(self.table.rowCount()):
+            key = self.table.item(row, 0).text()
+            param = self.table.item(row, 1).text()
+            value = self.table.item(row, 2).text()
+
+            if key not in updated_models:
+                updated_models[key] = {}
+
+            try:
+                updated_models[key][param] = float(value) if '.' in value else int(value)
+            except ValueError:
+                updated_models[key][param] = value
+
+        overrides_path = os.path.join(self.workdir, "camera_models_overrides.json")
+        with open(overrides_path, "w") as f:
+            json.dump(updated_models, f, indent=4)
+
+        QMessageBox.information(self, "Success", "Camera models saved successfully!")
+        self.accept()
+
+
+def load_camera_models(workdir):
+    """camera_models.json をベースに camera_models_overrides.json を適用する"""
+    camera_models_path = os.path.join(workdir, "camera_models.json")
+    overrides_path = os.path.join(workdir, "camera_models_overrides.json")
+
+    if os.path.exists(camera_models_path):
+        with open(camera_models_path, "r") as f:
+            base_models = json.load(f)
+    else:
+        base_models = {}
+
+    if os.path.exists(overrides_path):
+        with open(overrides_path, "r") as f:
+            overrides = json.load(f)
+    else:
+        overrides = {}
+
+    merged_models = base_models.copy()
+    for key, params in overrides.items():
+        if key in merged_models:
+            merged_models[key].update(params)
+        else:
+            merged_models[key] = params
+
+    return merged_models
+
+
+def open_camera_model_editor(main_app):
+    """カメラモデルエディターを開く"""
+    dialog = CameraModelEditor(main_app.camera_models, main_app.workdir, parent=main_app)
+    if dialog.exec_():
+        main_app.camera_models = load_camera_models(main_app.workdir)
+
+
 class StartDialog(QDialog):
     """Dialog to offer options at startup."""
     def __init__(self, parent=None):
@@ -343,30 +439,24 @@ class MainApp(QMainWindow):
                 self.matching_tab_initialized = True
 
     def show_start_dialog(self):
-        """Display a dialog to select an option at startup."""
-        dialog = StartDialog(self)
-        dialog.setWindowModality(Qt.ApplicationModal)
-        if dialog.exec_() == QDialog.Accepted:
-            if dialog.selection == "new":
-                self.start_new_reconstruction()
-            elif dialog.selection == "existing":
-                self.start_from_existing_data()
-
-    def start_new_reconstruction(self):
-        """Process to start a new reconstruction."""
-        self.load_workdir(new_project=True)
-
-    def start_from_existing_data(self):
-        """Process to start from existing data."""
-        self.load_workdir(new_project=False)
-
-    def load_workdir(self, new_project):
-        """Load the work directory and initialize MaskManager."""
+        """起動時にワークディレクトリを選択し、カメラモデルを編集する"""
         self.workdir = QFileDialog.getExistingDirectory(self, "Select Workdir")
         if not self.workdir:
-            return
+            QMessageBox.warning(self, "Error", "No workdir selected. Exiting.")
+            sys.exit(1)
 
-        # images folder check
+        self.camera_models = load_camera_models(self.workdir)
+        open_camera_model_editor(self)
+        self.load_workdir()
+
+    def load_workdir(self):
+        """Load the work directory and initialize MaskManager."""
+        if not self.workdir:  # もし workdir が未設定なら選択ダイアログを開く
+            self.workdir = QFileDialog.getExistingDirectory(self, "Select Workdir")
+            if not self.workdir:
+                return
+
+        # images フォルダの確認
         img_dir = os.path.join(self.workdir, "images")
         exif_dir = os.path.join(self.workdir, "exif")
         if not os.path.exists(img_dir):
@@ -377,23 +467,20 @@ class MainApp(QMainWindow):
                 dataset = DataSet(self.workdir)
                 from opensfm.actions import extract_metadata
                 extract_metadata.run_dataset(dataset)
-                
-                config_src = "config/config.yaml" 
+
+                config_src = "config/config.yaml"
                 config_dest = os.path.join(self.workdir, "config.yaml")
-                shutil.copy(config_src, config_dest)                
+                shutil.copy(config_src, config_dest)
             except Exception as e:
                 QMessageBox.warning(self, "Error", f"Failed to extract metadata or copy config.yaml: {e}")
                 return
 
-            # Create or check masks folder
+            # masks フォルダの作成または確認
             mask_dir = os.path.join(self.workdir, "masks")
-            if new_project:
+            if not os.path.exists(mask_dir):
                 os.makedirs(mask_dir, exist_ok=True)
-            else:
-                if not os.path.exists(mask_dir):
-                    os.makedirs(mask_dir, exist_ok=True)
 
-            # Set self.image_list here
+            # 画像リストの作成
             self.image_list = [
                 f for f in os.listdir(img_dir)
                 if f.lower().endswith(('.png', '.jpg', '.jpeg'))
@@ -467,10 +554,14 @@ class MainApp(QMainWindow):
             pass
 
     def display_exif_data(self, exif_data):
-        """Display EXIF data in a table."""
+        """EXIF データをテーブルに表示し、overrides の情報があれば適用する"""
         self.exif_table.setRowCount(0)
         self.exif_table.setHorizontalHeaderLabels(["Field", "Value"])
         self.exif_table.clearContents()
+
+        # もし camera_models_overrides.json にカメラの設定があれば適用
+        camera_name = exif_data.get("camera", "Unknown Camera")
+        overrides = self.camera_models.get(camera_name, {})
 
         # Define the fields to display and their order
         fields = [
@@ -489,14 +580,20 @@ class MainApp(QMainWindow):
         for i, field in enumerate(fields):
             self.exif_table.insertRow(i)
             key_item = QTableWidgetItem(field)
-            value = exif_data.get(field, "N/A")
+
+            # EXIF データの値を取得し、overrides があれば適用
+            value = overrides.get(field, exif_data.get(field, "N/A"))
+            
+            # JSON の辞書データを文字列に変換
             if isinstance(value, dict):
                 value = json.dumps(value)
             elif isinstance(value, float):
                 value = f"{value:.2f}"
+
             value_item = QTableWidgetItem(str(value))
             self.exif_table.setItem(i, 0, key_item)
             self.exif_table.setItem(i, 1, value_item)
+
 
     def display_mask(self, item, column):
         """Display the mask corresponding to the selected image."""
