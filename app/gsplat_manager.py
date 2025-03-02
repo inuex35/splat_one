@@ -8,7 +8,9 @@ from scipy.spatial.transform import Rotation  # 回転変換用
 from utils.logger import setup_logger
 import nerfview
 from utils.gsplat_utils.gsplat_trainer import Runner, Config
+from utils.datasets.opensfm import *
 from typing_extensions import assert_never
+from pyproj import Proj
 
 logger = setup_logger()
 
@@ -94,9 +96,78 @@ class GsplatManager(QWidget):
                 logger.error(f"Error processing shot '{shot_name}': {e}")
                 continue
 
+    def read_opensfm(self, reconstructions):
+        """Extracts camera and image information from OpenSfM reconstructions."""
+        self.images = {}
+        i = 0
+        reference_lat_0 = reconstructions[0]["reference_lla"]["latitude"]
+        reference_lon_0 = reconstructions[0]["reference_lla"]["longitude"]
+        reference_alt_0 = reconstructions[0]["reference_lla"]["altitude"]
+        e2u_zone = int(divmod(reference_lon_0, 6)[0]) + 31
+        e2u_conv = Proj(proj='utm', zone=e2u_zone, ellps='WGS84')
+        reference_x_0, reference_y_0 = e2u_conv(reference_lon_0, reference_lat_0)
+        if reference_lat_0 < 0:
+            reference_y_0 += 10000000
+        
+        self.cameras = {}
+        self.camera_names = {}
+        cam_id = 1
+        
+        for reconstruction in reconstructions:
+            # Parse cameras.
+            for i, camera in enumerate(reconstruction["cameras"]):
+                camera_name = camera
+                camera_info = reconstruction["cameras"][camera]
+                if camera_info['projection_type'] in ['spherical', 'equirectangular']:
+                    camera_id = 0
+                    model = "SPHERICAL"
+                    width = reconstruction["cameras"][camera]["width"]
+                    height = reconstruction["cameras"][camera]["height"]
+                    params = np.array([0])
+                    self.cameras[camera_id] = Camera(id=camera_id, model=model, width=width, height=height, params=params, panorama=True)
+                    self.camera_names[camera_name] = camera_id
+                elif reconstruction["cameras"][camera]['projection_type'] == "perspective":
+                    model = "SIMPLE_PINHOLE"
+                    width = reconstruction["cameras"][camera]["width"]
+                    height = reconstruction["cameras"][camera]["height"]
+                    f = reconstruction["cameras"][camera]["focal"] * width
+                    k1 = reconstruction["cameras"][camera]["k1"]
+                    k2 = reconstruction["cameras"][camera]["k2"]
+                    params = np.array([f, width / 2, height / 2, k1, k2])
+                    camera_id = cam_id
+                    self.cameras[camera_id] = Camera(id=camera_id, model=model, width=width, height=height, params=params, panorama=False)
+                    self.camera_names[camera_name] = camera_id
+                    cam_id += 1
+            
+            reference_lat = reconstruction["reference_lla"]["latitude"]
+            reference_lon = reconstruction["reference_lla"]["longitude"]
+            reference_alt = reconstruction["reference_lla"]["altitude"]
+            reference_x, reference_y = e2u_conv(reference_lon, reference_lat)
+            if reference_lat < 0:
+                reference_y += 10000000        
+            for j, shot in enumerate(reconstruction["shots"]):
+                translation = reconstruction["shots"][shot]["translation"]
+                rotation = reconstruction["shots"][shot]["rotation"]
+                qvec = angle_axis_to_quaternion(rotation)
+                diff_ref_x = reference_x - reference_x_0
+                diff_ref_y = reference_y - reference_y_0
+                diff_ref_alt = reference_alt - reference_alt_0
+                tvec = np.array([translation[0], translation[1], translation[2]])
+                diff_ref = np.array([diff_ref_x, diff_ref_y, diff_ref_alt])
+                camera_name = reconstruction["shots"][shot]["camera"]
+                camera_id = self.camera_names.get(camera_name, 0)
+                image_id = j
+                image_name = shot
+                xys = np.array([0, 0])
+                point3D_ids = np.array([0, 0])
+                self.images[image_id] = Image(id=image_id, qvec=qvec, tvec=tvec, camera_id=camera_id, name=image_name, xys=xys, point3D_ids=point3D_ids, diff_ref=diff_ref)
+        #return cameras, images
+
     def on_camera_item_clicked(self, item, column):
         """ツリービューのカメラがクリックされたとき、そのカメラ位置でレンダリングを実行する"""
         shot_name = item.text(0)
+        self.move_to_camera(shot_name)
+        """
         # カメラ情報を検索
         for cam in self.cameras:
             if cam[0] == shot_name:
@@ -104,11 +175,11 @@ class GsplatManager(QWidget):
                 # ここでは c2w 行列を、回転行列と平行移動から構築する例
                 c2w = np.eye(4)
                 c2w[:3, :3] = rotation  # 回転部分
-                c2w[:3, 3] = position    # 位置情報
+                c2w[:3, 3] = position  # 位置情報
                 #camera_param = self.runner.get_camera_param(cam_type)
                 # JSONから取得したカメラ情報を用いてカメラ状態を構築
                 camera_state = nerfview.CameraState(
-                fov=90,
+                fov=90 / 180.0 * np.pi,
                 aspect=1.0,
                 c2w=c2w,
                 )
@@ -125,31 +196,15 @@ class GsplatManager(QWidget):
                 self.image_label.setPixmap(pixmap)
                 logger.info(f"{shot_name} の位置でレンダリングを実行しました。")
                 break
+        """
 
     def on_camera_image_tree_click(self, image_name):
         """シングルクリックされた画像に関連付けられたカメラをハイライト"""
-        self.highlight_camera(image_name)
+        self.move_to_camera(image_name)
 
     def on_camera_image_tree_double_click(self, image_name):
         """ダブルクリックされた画像に関連付けられたカメラ位置に移動"""
         self.move_to_camera(image_name)
-
-    def highlight_camera(self, cam_name, highlight_color=(1, 0, 0, 0.8)):
-        """指定されたカメラをハイライトする処理（例）"""
-        for name, item, position, rotation_matrix, cam_model in self.cameras:
-            if name == cam_name:
-                logger.info(f"Highlighting camera: {cam_name}")
-                if cam_model in ["spherical", "equirectangular"]:
-                    item.setColor(highlight_color)
-                else:
-                    for edge in item:
-                        edge.setData(color=highlight_color)
-            else:
-                if cam_model in ["spherical", "equirectangular"]:
-                    item.setColor((1, 1, 1, 0.3))
-                else:
-                    for edge in item:
-                        edge.setData(color=(1, 1, 1, 0.5))
 
     def move_to_camera(self, image_name):
         """
@@ -164,7 +219,7 @@ class GsplatManager(QWidget):
                 # c2w行列を作成（回転と平行移動を反映）
                 c2w = np.eye(4)
                 c2w[:3, :3] = rotation
-                c2w[:3, 3] = position
+                c2w[:3, 3] = position / 100
                 #camera_param = self.runner.get_camera_param(cam_type)
                 # JSONから取得したカメラ情報を用いてカメラ状態を構築
                 camera_state = nerfview.CameraState(
