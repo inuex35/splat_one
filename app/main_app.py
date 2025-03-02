@@ -419,9 +419,18 @@ class MainApp(QMainWindow):
         # 画像リストをポピュレート
         self.populate_tree_with_camera_data(self.gsplat_image_tree)
         
-        # 左側の画像リストでアイテムがクリックされたときのイベントを接続
-        self.gsplat_image_tree.itemClicked.connect(self.display_gsplat_image)
+        # 画像リストのアイテムがシングルクリックされたら、
+        # GsplatManager の on_camera_image_tree_click(image_name) を呼び出す
 
+        #self.gsplat_image_tree.itemClicked.connect(
+        #    lambda item, column: self.gsplat_manager.on_camera_image_tree_click(item.text(0))
+        #)
+        
+        # 画像リストのアイテムがダブルクリックされたら、
+        # GsplatManager の on_camera_image_tree_double_click(image_name) を呼び出す
+        self.gsplat_image_tree.itemDoubleClicked.connect(
+            lambda item, column: self.gsplat_manager.on_camera_image_tree_double_click(item.text(0))
+        )
     def on_tab_changed(self, index):
         """Handle actions when a tab is changed."""
         tab_name = self.tab_widget.tabText(index)
