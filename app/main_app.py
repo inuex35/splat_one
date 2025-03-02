@@ -7,7 +7,7 @@ import importlib.util
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QToolBar, QAction, QFileDialog, QMessageBox,
     QDialog, QVBoxLayout, QPushButton, QLabel, QWidget, QTabWidget, QSplitter,
-    QListWidget, QListWidgetItem, QTreeWidget, QTreeWidgetItem, QTextEdit, QTableWidget, QTableWidgetItem
+    QListWidget, QListWidgetItem, QTreeWidget, QTreeWidgetItem, QTextEdit, QTableWidget, QTableWidgetItem, QComboBox
 )
 from PyQt5.QtCore import Qt, QTimer
 from opensfm.dataset import DataSet
@@ -15,7 +15,6 @@ from app.mask_manager import MaskManager  # Import the updated MaskManager class
 from app.feature_extractor import FeatureExtractor  # 新しく追加
 from app.feature_matching import FeatureMatching  # 新しく追加
 from app.point_cloud_visualizer import Reconstruction  # Import the PointCloudVisualizer class
-
 
 class CameraModelEditor(QDialog):
     """カメラモデル編集ダイアログ"""
@@ -28,10 +27,11 @@ class CameraModelEditor(QDialog):
         self.workdir = workdir
 
         layout = QVBoxLayout()
+        layout.addWidget(QLabel("Camera Model Overrides"))
+
         self.table = QTableWidget()
         self.table.setColumnCount(3)
         self.table.setHorizontalHeaderLabels(["Key", "Parameter", "Value"])
-        self.load_camera_models()
         layout.addWidget(self.table)
 
         save_button = QPushButton("Save Changes")
@@ -40,35 +40,86 @@ class CameraModelEditor(QDialog):
 
         self.setLayout(layout)
 
+        self.load_camera_models()
+
     def load_camera_models(self):
         """カメラモデルをテーブルにロードする"""
         self.table.setRowCount(0)
         row = 0
         for key, params in self.camera_models.items():
+            # key = 'Perspective' などカメラモデル名 (例: "Spherical")
+            # params = { 'projection_type': 'perspective', 'width': ..., etc. }
             for param, value in params.items():
                 self.table.insertRow(row)
+                # 1列目(Key)
                 self.table.setItem(row, 0, QTableWidgetItem(key))
+
+                # 2列目(Parameter)
                 self.table.setItem(row, 1, QTableWidgetItem(param))
-                self.table.setItem(row, 2, QTableWidgetItem(str(value)))
+
+                # 3列目(Value) - projection_type だけはComboBoxに
+                if param == "projection_type":
+                    combo = QComboBox()
+                    combo.addItems(["Perspective", "Spherical"])
+                    # 今の値に合わせて選択状態を変更
+                    if str(value) in ["Perspective", "Spherical"]:
+                        combo.setCurrentText(str(value))
+                    else:
+                        # もし「登録されていない値」だったら先頭に追加して選択
+                        combo.insertItem(0, str(value))
+                        combo.setCurrentIndex(0)
+                    self.table.setCellWidget(row, 2, combo)
+                else:
+                    # それ以外はテキスト表示
+                    self.table.setItem(row, 2, QTableWidgetItem(str(value)))
+
                 row += 1
 
     def save_changes(self):
         """カメラモデルの変更を camera_models_overrides.json に保存"""
         updated_models = {}
-
         for row in range(self.table.rowCount()):
-            key = self.table.item(row, 0).text()
-            param = self.table.item(row, 1).text()
-            value = self.table.item(row, 2).text()
+            key_item = self.table.item(row, 0)
+            param_item = self.table.item(row, 1)
+
+            if not key_item or not param_item:
+                continue
+
+            key = key_item.text()
+            param = param_item.text()
+
+            # ValueがComboBoxかどうか判定
+            cell_widget = self.table.cellWidget(row, 2)
+            if isinstance(cell_widget, QComboBox):
+                # ComboBoxなら現在のテキストを取得
+                value = cell_widget.currentText()
+            else:
+                # 普通のQTableWidgetItemならテキストを取得
+                value_item = self.table.item(row, 2)
+                if value_item:
+                    value = value_item.text()
+                else:
+                    value = ""
+
+            # 数値ならfloat/intに変換して格納
+            # ※ projection_type は文字列なので通常は変換されない
+            try:
+                # '.' を含む場合はfloat、それ以外はint
+                if '.' in value:
+                    num = float(value)
+                    value = num
+                else:
+                    num = int(value)
+                    value = num
+            except ValueError:
+                # 数値変換できなかった場合は文字列のまま
+                pass
 
             if key not in updated_models:
                 updated_models[key] = {}
+            updated_models[key][param] = value
 
-            try:
-                updated_models[key][param] = float(value) if '.' in value else int(value)
-            except ValueError:
-                updated_models[key][param] = value
-
+        # JSON 書き込み
         overrides_path = os.path.join(self.workdir, "camera_models_overrides.json")
         with open(overrides_path, "w") as f:
             json.dump(updated_models, f, indent=4)
@@ -109,38 +160,7 @@ def open_camera_model_editor(main_app):
     dialog = CameraModelEditor(main_app.camera_models, main_app.workdir, parent=main_app)
     if dialog.exec_():
         main_app.camera_models = load_camera_models(main_app.workdir)
-
-
-class StartDialog(QDialog):
-    """Dialog to offer options at startup."""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Select an Option")
-        self.setFixedSize(300, 150)
-        layout = QVBoxLayout()
-
-        self.label = QLabel("Please select an option:")
-        layout.addWidget(self.label, alignment=Qt.AlignCenter)
-
-        self.new_button = QPushButton("New Reconstruction")
-        self.new_button.clicked.connect(self.accept_new)
-        layout.addWidget(self.new_button)
-
-        self.existing_button = QPushButton("Start from Existing Data")
-        self.existing_button.clicked.connect(self.accept_existing)
-        layout.addWidget(self.existing_button)
-
-        self.selection = None
-        self.setLayout(layout)
-
-    def accept_new(self):
-        self.selection = "new"
-        self.accept()
-
-    def accept_existing(self):
-        self.selection = "existing"
-        self.accept()
-
+        
 class MaskManagerWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -314,6 +334,7 @@ class MainApp(QMainWindow):
 
         # Connect signals
         self.camera_image_tree.itemClicked.connect(self.display_features_for_image)
+
     def init_matching_tab(self):
         """Initialize the Matching tab."""
         layout = QSplitter(Qt.Horizontal)
@@ -346,38 +367,6 @@ class MainApp(QMainWindow):
         self.camera_image_tree_left.itemClicked.connect(self.on_image_selected_left)
         self.camera_image_tree_right.itemClicked.connect(self.on_image_selected_right)
     
-    def init_matching_tab(self):
-        """Initialize the Matching tab."""
-        layout = QSplitter(Qt.Horizontal)
-
-        # Left side: Tree of images (Column 1)
-        self.camera_image_tree_left = QTreeWidget()
-        self.camera_image_tree_left.setHeaderLabel("Cameras and Images - Left")
-        self.camera_image_tree_left.setFixedWidth(250)  # Set fixed width
-        layout.addWidget(self.camera_image_tree_left)
-
-        # Right side: Tree of images (Column 2)
-        self.camera_image_tree_right = QTreeWidget()
-        self.camera_image_tree_right.setHeaderLabel("Cameras and Images - Right")
-        self.camera_image_tree_right.setFixedWidth(250)  # Set fixed width
-        layout.addWidget(self.camera_image_tree_right)
-
-        # Center: Add MatchingTab widget
-        self.matching_viewer = FeatureMatching(workdir=self.workdir, image_list=self.image_list)
-        layout.addWidget(self.matching_viewer)
-
-        # Set layout for matching tab
-        self.matching_tab.setLayout(QVBoxLayout())
-        self.matching_tab.layout().addWidget(layout)
-
-        # Populate each tree with camera data
-        self.populate_tree_with_camera_data(self.camera_image_tree_left)
-        self.populate_tree_with_camera_data(self.camera_image_tree_right)
-
-        # Connect signals for image selection
-        self.camera_image_tree_left.itemClicked.connect(self.on_image_selected_left)
-        self.camera_image_tree_right.itemClicked.connect(self.on_image_selected_right)
-
     def init_reconstruct_tab(self):
         """Initialize the Reconstruct tab."""
         layout = QSplitter(Qt.Horizontal)
@@ -465,12 +454,12 @@ class MainApp(QMainWindow):
         else:
             try:
                 dataset = DataSet(self.workdir)
-                from opensfm.actions import extract_metadata
-                extract_metadata.run_dataset(dataset)
 
                 config_src = "config/config.yaml"
                 config_dest = os.path.join(self.workdir, "config.yaml")
                 shutil.copy(config_src, config_dest)
+                from opensfm.actions import extract_metadata
+                extract_metadata.run_dataset(dataset)
             except Exception as e:
                 QMessageBox.warning(self, "Error", f"Failed to extract metadata or copy config.yaml: {e}")
                 return
