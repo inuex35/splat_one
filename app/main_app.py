@@ -60,9 +60,9 @@ class CameraModelEditor(QDialog):
                 # 3列目(Value) - projection_type だけはComboBoxに
                 if param == "projection_type":
                     combo = QComboBox()
-                    combo.addItems(["Perspective", "Spherical"])
+                    combo.addItems(["perspective", "spherical"])
                     # 今の値に合わせて選択状態を変更
-                    if str(value) in ["Perspective", "Spherical"]:
+                    if str(value) in ["perspective", "spherical"]:
                         combo.setCurrentText(str(value))
                     else:
                         # もし「登録されていない値」だったら先頭に追加して選択
@@ -406,8 +406,6 @@ class MainApp(QMainWindow):
             if self.mask_manager is not None:
                 self.mask_manager.unload_sam_model()
 
-
-
         if tab_name == "Reconstruct":
             if not self.reconstruct_tab_initialized:
                 self.init_reconstruct_tab()
@@ -461,8 +459,7 @@ class MainApp(QMainWindow):
                 from opensfm.actions import extract_metadata
                 extract_metadata.run_dataset(dataset)
             except Exception as e:
-                QMessageBox.warning(self, "Error", f"Failed to extract metadata or copy config.yaml: {e}")
-                return
+                pass#QMessageBox.warning(self, "Error", f"Failed to extract metadata or copy config.yaml: {e}")
 
             # masks フォルダの作成または確認
             mask_dir = os.path.join(self.workdir, "masks")
