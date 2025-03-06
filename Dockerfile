@@ -137,9 +137,8 @@ RUN pip install --no-cache-dir git+https://github.com/rmbrualla/pycolmap@cc7ea4b
 # Clone and install FlashAttention with shallow clone and remove .git afterwards
 RUN git clone --depth 1 https://github.com/Dao-AILab/flash-attention.git /flash-attention && \
     cd /flash-attention && \
-    pip install --no-cache-dir . && \
-    rm -rf /flash-attention/.git
-
+    pip install --no-cache-dir .
+    
 # Clone and install LightGlue with shallow clone
 RUN git clone --depth 1 https://github.com/cvg/LightGlue.git /LightGlue && \
     cd /LightGlue && pip install --no-cache-dir .
@@ -154,22 +153,19 @@ RUN cd /source/splat_one/submodules/opensfm && \
     git submodule update --init --recursive && \
     python3 setup.py build && \
     python3 setup.py install && \
-    pip install --no-cache-dir jupyter jupyterlab pyproj && \
-    rm -rf /source/splat_one/submodules/opensfm/.git
+    pip install --no-cache-dir jupyter jupyterlab pyproj
 
 # gtsfm サブモジュールのビルド
 RUN cd /source/splat_one/submodules/gsplat && \
     git checkout b0e978da67fb4364611c6683c5f4e6e6c1d8d8cb && \
-    MAX_JOBS=4 pip install -e . && \
-    rm -rf .git
+    MAX_JOBS=4 pip install -e .
 
 RUN mkdir /source/splat_one/dataset
 
 # sam2 サブモジュールのビルド
 RUN cd /source/splat_one/submodules/sam2 && \
     pip install -e ".[notebooks]" && \
-    cd checkpoints && ./download_ckpts.sh && \
-    rm -rf /source/splat_one/submodules/sam2/.git
+    cd checkpoints && ./download_ckpts.sh
 
 # opencv-python の入れ替えと他パッケージのインストール
 RUN pip install --no-cache-dir --upgrade cloudpickle && \
