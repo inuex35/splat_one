@@ -144,7 +144,7 @@ RUN git clone --depth 1 https://github.com/cvg/LightGlue.git /LightGlue && \
     cd /LightGlue && pip install --no-cache-dir .
 
 # Clone splat_one リポジトリも浅いクローンに変更し、サブモジュールも更新後に不要な .git を削除
-RUN git clone --depth 1 https://github.com/inuex35/splat_one.git /source/splat_one && \
+RUN git clone https://github.com/inuex35/splat_one.git /source/splat_one && \
     cd /source/splat_one && \
     git submodule update --init --recursive
 
