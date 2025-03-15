@@ -174,7 +174,7 @@ class MaskManagerWidget(QWidget):
 class MainApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("SAM2 Mask Creator")
+        self.setWindowTitle("SPLAT_ONE")
         self.setGeometry(100, 100, 1200, 800)
         self.image_list = []  # Initialize image_list
 
@@ -431,6 +431,7 @@ class MainApp(QMainWindow):
         self.gsplat_image_tree.itemDoubleClicked.connect(
             lambda item, column: self.gsplat_manager.on_camera_image_tree_double_click(item.text(0))
         )
+
     def on_tab_changed(self, index):
         """Handle actions when a tab is changed."""
         tab_name = self.tab_widget.tabText(index)
@@ -476,9 +477,10 @@ class MainApp(QMainWindow):
             QMessageBox.warning(self, "Error", "No workdir selected. Exiting.")
             sys.exit(1)
 
+        self.load_workdir()
+
         self.camera_models = load_camera_models(self.workdir)
         open_camera_model_editor(self)
-        self.load_workdir()
 
     def load_workdir(self):
         """Load the work directory and initialize MaskManager."""
@@ -492,7 +494,7 @@ class MainApp(QMainWindow):
         exif_dir = os.path.join(self.workdir, "exif")
         if not os.path.exists(img_dir):
             QMessageBox.warning(self, "Error", "images folder does not exist.")
-            return
+            sys.exit(1)
         else:
             try:
                 dataset = DataSet(self.workdir)

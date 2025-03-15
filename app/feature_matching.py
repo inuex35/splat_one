@@ -17,7 +17,8 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtGui import QPixmap, QImage, QIntValidator, QDoubleValidator
 from PyQt5.QtCore import Qt
-from opensfm import dataset, features
+from opensfm import dataset, matching, features 
+from opensfm.actions import match_features
 import yaml
 
 
@@ -291,11 +292,10 @@ class FeatureMatching(QWidget):
                 self.plot_combined_keypoints(pixels_left, pixels_right)
 
     def run_match_features(self):
-        """When match button is pressed"""
-        if not self.current_image_name_left or not self.current_image_name_right:
-            QMessageBox.warning(self, "Error", "Both left and right images must be loaded for matching.")
-            return
-        self.update_keypoints_and_matches()
+        """Run feature detection on all images in the dataset."""
+        match_features.run_dataset(self.dataset)
+        QMessageBox.information(self, "Feature Matching", "Feature Matching completed for all images.")
+
 
     def configure_matching(self):
         """Matching configuration"""

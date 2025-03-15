@@ -9,6 +9,8 @@ from utils.logger import setup_logger
 import json
 import sys
 from scipy.spatial.transform import Rotation
+from opensfm.actions import reconstruct, create_tracks
+from opensfm.reconstruction import ReconstructionAlgorithm
 import os
 # ログの設定
 logger = setup_logger()
@@ -35,7 +37,8 @@ class Reconstruction(QWidget):
         super().__init__()
         self.workdir = workdir
         self.reconstruction_file = os.path.join(workdir, "reconstruction.json")
-        
+        self.dataset = dataset.DataSet(workdir)
+
         # メインレイアウトの設定
         main_layout = QVBoxLayout(self)
         
@@ -81,12 +84,15 @@ class Reconstruction(QWidget):
             if reply == QMessageBox.Yes:
                 # Proceed with reconstruction logic
                 logger.info("User confirmed to run reconstruction.")
-                # Add your reconstruction logic here
-                self.update_visualization()
+                create_tracks.run_dataset(self.dataset)
+                reconstruct.run_dataset(self.dataset, ReconstructionAlgorithm.INCREMENTAL) 
+                self.update_visualization()   
             else:
-                logger.info("User skipped the reconstruction.")
+                pass
         else:
-            logger.info("No reconstruction data found.")
+            create_tracks.run_dataset(self.dataset)
+            reconstruct.run_dataset(self.dataset, ReconstructionAlgorithm.INCREMENTAL)
+            self.update_visualization()
 
     def configure_reconstruction(self):
         """Open the configuration dialog for feature extraction."""
