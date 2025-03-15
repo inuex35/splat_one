@@ -26,7 +26,9 @@ splat_one is an integrated application that combines Gaussian Splatting and Stru
   Presents the output of the Gaussian Splatting process. You can adjust parameters to explore different renderings of the 3D point cloud.
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/919f2dd9-3954-41df-836b-6b7d3d42a4c6" alt="splat_one_resized" width="600"/>
+  <a href="https://www.youtube.com/watch?v=m7eIe_ZGAqQ" target="_blank">
+    <img src="https://github.com/user-attachments/assets/919f2dd9-3954-41df-836b-6b7d3d42a4c6" alt="splat_one_resized" width="600"/>
+  </a>
 </p>
 
 ## Data Preparation
