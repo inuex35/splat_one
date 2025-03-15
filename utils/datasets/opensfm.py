@@ -326,8 +326,21 @@ class Dataset:
         indices = np.arange(len(self.parser.images))  # Use images from parser
         if split == "train":
             self.indices = indices[indices % self.parser.test_every != 0]
-        else:
+        elif split == "val":
             self.indices = indices[indices % self.parser.test_every == 0]
+        else:
+            self.indices = indices
+        # Build a lookup dictionary mapping image_name to local index
+        self.build_index()
+
+    def build_index(self):
+        """Build a dictionary mapping image name to local dataset index."""
+        # Iterate over the local indices and map image name to local index
+        self.image_name_to_local_idx = {}
+        for local_idx, global_idx in enumerate(self.indices):
+            # Assume parser.images[global_idx] is already loaded and has a 'name' attribute
+            image_name = self.parser.images[global_idx].name
+            self.image_name_to_local_idx[image_name] = local_idx
 
     def __len__(self):
         return len(self.indices)
@@ -372,6 +385,7 @@ class Dataset:
             "camtoworld": torch.from_numpy(camtoworld).float(),
             "image": torch.from_numpy(image).float(),
             "image_id": item,  # the index of the image in the dataset
+            "image_name": img_name,
         }
 
         if self.load_depths:
@@ -380,6 +394,15 @@ class Dataset:
             data["depths"] = torch.from_numpy(depths).float()
 
         return data
+
+    def get_data_by_image_name(self, image_name: str) -> Optional[Dict[str, Any]]:
+        """Return the data corresponding to the specified image name using the lookup dictionary."""
+        local_idx = self.image_name_to_local_idx.get(image_name)
+        if local_idx is not None:
+            return self.__getitem__(local_idx)
+        else:
+            return None
+
 
 def read_opensfm(reconstructions):
     """Extracts camera and image information from OpenSfM reconstructions."""

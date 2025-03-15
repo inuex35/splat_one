@@ -318,6 +318,9 @@ class Runner:
             load_depths=cfg.depth_loss,
         )
         self.valset = Dataset(self.parser, split="val")
+        self.allset = Dataset(self.parser, split="all")
+        self.allset_dict = {data["image_name"]: data for data in self.allset}
+
         self.scene_scale = self.parser.scene_scale * 1.1 * cfg.global_scale
         print("Scene scale:", self.scene_scale)
 
@@ -909,8 +912,16 @@ class Runner:
         W, H = img_wh
         c2w = camera_state.c2w
         K = camera_state.get_K(img_wh)
-        c2w = torch.from_numpy(c2w).float().to(self.device)
-        K = torch.from_numpy(K).float().to(self.device)
+        # If c2w is a numpy array, convert it to a torch Tensor; otherwise, use it directly.
+        if isinstance(c2w, np.ndarray):
+            c2w = torch.from_numpy(c2w).float().to(self.device)
+        else:
+            c2w = c2w.float().to(self.device)
+        # Do the same for K.
+        if isinstance(K, np.ndarray):
+            K = torch.from_numpy(K).float().to(self.device)
+        else:
+            K = K.float().to(self.device)
         render_colors, _, _ = self.rasterize_splats(
             camtoworlds=c2w[None],
             Ks=K[None],
@@ -920,6 +931,7 @@ class Runner:
             radius_clip=3.0,
         )
         return render_colors[0].cpu().numpy()
+
 
 
 def main(local_rank: int, world_rank, world_size: int, cfg: Config):

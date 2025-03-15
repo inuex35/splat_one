@@ -208,41 +208,58 @@ class GsplatManager(QWidget):
 
     def move_to_camera(self, image_name):
         """
-        指定された画像名に対応するカメラ位置へビューを移動する処理の例です。
-        ここでは、保持している self.cameras（各要素：(name, rotation, position, cam_type)）
-        から該当するものを探し、c2w行列を再構築して runner のレンダリング関数を呼び出すことで、
-        新たなレンダリング結果（ビュー）に更新します。
+        指定された画像名に対応するカメラ位置へビューを移動する処理。
+        辞書から直接データを取得することで、全件走査のオーバーヘッドを削減します。
         """
-        for name, rotation, position, _, _ in self.cameras:
-            if name == image_name:
-                logger.info(f"Moving to camera position for image '{image_name}'")
-                # c2w行列を作成（回転と平行移動を反映）
-                c2w = np.eye(4)
-                c2w[:3, :3] = rotation
-                c2w[:3, 3] = position / 100
-                #camera_param = self.runner.get_camera_param(cam_type)
-                # JSONから取得したカメラ情報を用いてカメラ状態を構築
-                camera_state = nerfview.CameraState(
-                fov=90,
-                aspect=1.0,
-                c2w=c2w,
-                )
+        import time
+        start_total = time.time()  # Start overall timer
 
-                # オプション：回転から yaw, pitch を計算（ビューア操作の参考用）
-                yaw = np.arctan2(rotation[1, 0], rotation[0, 0])
-                pitch = np.arcsin(-rotation[2, 0])
-                logger.info(f"Position: {position}, Yaw: {np.degrees(yaw):.1f}, Pitch: {np.degrees(pitch):.1f}")
+        # Retrieve the sample directly from the dictionary
+        data = self.runner.allset_dict.get(image_name)
+        if data is None:
+            logger.error(f"Image '{image_name}' not found.")
+            return
 
-                # ここで、例えば runner._viewer_render_fn() を呼び出して新しいレンダリング画像を取得
-                img_wh = (640, 480)
-                render = self.runner._viewer_render_fn(camera_state, img_wh)
-                render_uint8 = (np.clip(render, 0, 1) * 255).astype(np.uint8)
-                height, width, channels = render_uint8.shape
-                bytes_per_line = channels * width
-                qimage = QImage(render_uint8.data, width, height, bytes_per_line, QImage.Format_RGB888)
-                pixmap = QPixmap.fromImage(qimage)
-                self.image_label.setPixmap(pixmap)
-                break
+        logger.info(f"Moving to camera position for image '{image_name}'")
+
+        # Measure transfer time
+        transfer_start = time.time()
+        c2w = data["camtoworld"].to(self.runner.device)
+        transfer_time = time.time() - transfer_start
+
+        # Construct the CameraState
+        camera_state = nerfview.CameraState(
+            fov=90,
+            aspect=1.0,
+            c2w=c2w,
+        )
+
+        # Measure rendering time
+        render_start = time.time()
+        img_wh = (640, 480)
+        render = self.runner._viewer_render_fn(camera_state, img_wh)
+        render_time = time.time() - render_start
+
+        # Measure post-processing time
+        post_start = time.time()
+        render_uint8 = (np.clip(render, 0, 1) * 255).astype(np.uint8)
+        height, width, channels = render_uint8.shape
+        bytes_per_line = channels * width
+        qimage = QImage(render_uint8.data, width, height, bytes_per_line, QImage.Format_RGB888)
+        pixmap = QPixmap.fromImage(qimage)
+        self.image_label.setPixmap(pixmap)
+        post_time = time.time() - post_start
+
+        total_time = time.time() - start_total
+
+        # Log the timings
+        logger.info(
+            f"Timing: Transfer={transfer_time:.4f}s, Render={render_time:.4f}s, "
+            f"PostProcessing={post_time:.4f}s, Total={total_time:.4f}s"
+        )
+
+
+
 
 
 if __name__ == "__main__":
