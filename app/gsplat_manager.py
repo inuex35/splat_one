@@ -1,7 +1,7 @@
 import os
 import json
 import numpy as np
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QTreeWidget, QTreeWidgetItem, QLabel
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QTreeWidget, QTreeWidgetItem, QLabel, QPushButton
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtCore import Qt
 from scipy.spatial.transform import Rotation  # 回転変換用
@@ -11,6 +11,7 @@ from utils.gsplat_utils.gsplat_trainer import Runner, Config
 from utils.datasets.opensfm import *
 from typing_extensions import assert_never
 from pyproj import Proj
+import threading
 
 logger = setup_logger()
 
@@ -33,31 +34,56 @@ def load_reconstruction(file_path: str):
 class GsplatManager(QWidget):
     def __init__(self, work_dir, parent=None):
         """
-        work_dir: 作業ディレクトリ。ここから画像位置情報のJSONファイルを読み込む。
+        work_dir: Working directory. Reconstruction JSON is loaded from here.
         """
         super().__init__(parent)
         self.workdir = work_dir
-        # 画像位置情報ファイルのパス（例: image_poses.json）
         self.reconstruction_json_path = os.path.join(self.workdir, "reconstruction.json")
-        # Runnerの初期化（Viewerは不要なのでdisable_viewer=True）
+        # Initialize Runner (disable viewer)
         cfg = Config(
             data_dir=self.workdir,
             result_dir=os.path.join(self.workdir, "results"),
             disable_viewer=True,
-            max_steps=1
+            max_steps=30000
         )
         self.runner = Runner(local_rank=0, world_rank=0, world_size=1, cfg=cfg)
         
-        # カメラ情報を保持するリスト。各要素は (name, c2w) 形式。
+        # Load camera data from JSON
         self.load_camera_data()
 
-        # レンダリング結果表示用の QLabel
+        # QLabel for rendering result
         self.image_label = QLabel("Rendering result")
         self.image_label.setAlignment(Qt.AlignCenter)
         
+        # Add a button to start training (or any desired action)
+        self.start_training_button = QPushButton("Start Training")
+        self.start_training_button.clicked.connect(self.start_training)
+        
+        # Set up layout
         layout = QVBoxLayout()
         layout.addWidget(self.image_label)
+        layout.addWidget(self.start_training_button)
         self.setLayout(layout)
+        self.training_running = False
+
+    def start_training(self):
+        """Toggle: Start training if not running, else signal to stop."""
+        import threading
+        if not self.training_running:
+            # Training を開始
+            self.training_running = True
+            self.start_training_button.setText("Stop Training")
+            self.runner.stop_training = False  # 停止フラグをリセット
+            self.train_thread = threading.Thread(target=self.runner.train)
+            self.train_thread.daemon = True
+            self.train_thread.start()
+            logger.info("Training started in background.")
+        else:
+            # Training を停止
+            self.runner.stop_training = True
+            self.training_running = False
+            self.start_training_button.setText("Start Training")
+            logger.info("Training stop requested.")
 
     def load_camera_data(self):
         """JSONから再構築データを読み取り、ポイントクラウドとカメラ情報を抽出する"""
@@ -234,20 +260,26 @@ class GsplatManager(QWidget):
             c2w=c2w,
         )
 
+        # 自動的に画像サイズを取得（data["image"] の shape から）
+        img_tensor = data["image"]
+        h, w, _ = img_tensor.shape
+        img_wh = (w, h)  # (width, height)
+
         # Measure rendering time
         render_start = time.time()
-        img_wh = (640, 480)
         render = self.runner._viewer_render_fn(camera_state, img_wh)
         render_time = time.time() - render_start
 
-        # Measure post-processing time
+        # Measure post-processing time and scale the image to fit the label
         post_start = time.time()
         render_uint8 = (np.clip(render, 0, 1) * 255).astype(np.uint8)
         height, width, channels = render_uint8.shape
         bytes_per_line = channels * width
         qimage = QImage(render_uint8.data, width, height, bytes_per_line, QImage.Format_RGB888)
         pixmap = QPixmap.fromImage(qimage)
-        self.image_label.setPixmap(pixmap)
+        # Scale pixmap to fit the label's current size while keeping aspect ratio
+        scaled_pixmap = pixmap.scaled(self.image_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.image_label.setPixmap(scaled_pixmap)
         post_time = time.time() - post_start
 
         total_time = time.time() - start_total
@@ -257,9 +289,6 @@ class GsplatManager(QWidget):
             f"Timing: Transfer={transfer_time:.4f}s, Render={render_time:.4f}s, "
             f"PostProcessing={post_time:.4f}s, Total={total_time:.4f}s"
         )
-
-
-
 
 
 if __name__ == "__main__":

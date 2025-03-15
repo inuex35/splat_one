@@ -433,6 +433,8 @@ class Runner:
             ).to(self.device)
         else:
             raise ValueError(f"Unknown LPIPS network: {cfg.lpips_net}")
+        self.stop_training = False  # 追加: 学習停止用フラグ
+
         """
         if not self.cfg.disable_viewer:
             self.server = viser.ViserServer(port=cfg.port, verbose=False)
@@ -551,7 +553,11 @@ class Runner:
                     time.sleep(0.01)
                 self.viewer.lock.acquire()
                 tic = time.time()
-
+            if self.stop_training:
+                print("Training stopped.")
+                torch.save(data, f"{self.ckpt_dir}/ckpt_{step}_rank{self.world_rank}.pt")
+                print("Model saved.")
+                break
             try:
                 data = next(trainloader_iter)
             except StopIteration:
