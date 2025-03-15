@@ -15,6 +15,8 @@ from app.mask_manager import MaskManager  # Import the updated MaskManager class
 from app.feature_extractor import FeatureExtractor  # 新しく追加
 from app.feature_matching import FeatureMatching  # 新しく追加
 from app.point_cloud_visualizer import Reconstruction  # Import the PointCloudVisualizer class
+from app.gsplat_manager import GsplatManager  # 新しく追加
+
 
 class CameraModelEditor(QDialog):
     """カメラモデル編集ダイアログ"""
@@ -392,6 +394,43 @@ class MainApp(QMainWindow):
         # Populate the tree with camera data
         self.populate_tree_with_camera_data(self.camera_image_tree)
 
+    def init_gsplat_tab(self):
+        """Gsplatタブの初期化 - 左側に画像リスト、右側にGSPLAT画像表示ウィジェット"""
+        layout = QSplitter(Qt.Horizontal)
+        
+        # 左側: 画像リストを表示するツリーウィジェット
+        self.gsplat_image_tree = QTreeWidget()
+        self.gsplat_image_tree.setHeaderLabel("Images")
+        self.gsplat_image_tree.setFixedWidth(250)
+        layout.addWidget(self.gsplat_image_tree)
+        
+        # 右側: GSPLAT画像表示用のウィジェット（GsplatManager を利用）
+        self.gsplat_manager = GsplatManager(self.workdir)
+        layout.addWidget(self.gsplat_manager)
+        
+        # 左右のストレッチファクターの設定（例：左=1, 右=4）
+        layout.setStretchFactor(0, 1)
+        layout.setStretchFactor(1, 4)
+        
+        # gsplat タブにレイアウトを設定
+        self.gsplat_tab.setLayout(QVBoxLayout())
+        self.gsplat_tab.layout().addWidget(layout)
+        
+        # 画像リストをポピュレート
+        self.populate_tree_with_camera_data(self.gsplat_image_tree)
+        
+        # 画像リストのアイテムがシングルクリックされたら、
+        # GsplatManager の on_camera_image_tree_click(image_name) を呼び出す
+
+        #self.gsplat_image_tree.itemClicked.connect(
+        #    lambda item, column: self.gsplat_manager.on_camera_image_tree_click(item.text(0))
+        #)
+        
+        # 画像リストのアイテムがダブルクリックされたら、
+        # GsplatManager の on_camera_image_tree_double_click(image_name) を呼び出す
+        self.gsplat_image_tree.itemDoubleClicked.connect(
+            lambda item, column: self.gsplat_manager.on_camera_image_tree_double_click(item.text(0))
+        )
     def on_tab_changed(self, index):
         """Handle actions when a tab is changed."""
         tab_name = self.tab_widget.tabText(index)
@@ -412,6 +451,11 @@ class MainApp(QMainWindow):
                 self.reconstruct_tab_initialized = True
             elif self.reconstruction_viewer:
                 self.reconstruction_viewer.update_visualization()
+
+        elif tab_name == "Gsplat":
+            if not hasattr(self, "gsplat_tab_initialized") or not self.gsplat_tab_initialized:
+                self.init_gsplat_tab()
+                self.gsplat_tab_initialized = True
 
         elif tab_name == "Features":
             # Featureタブの初期化処理
@@ -478,7 +522,6 @@ class MainApp(QMainWindow):
             else:
                 QMessageBox.warning(self, "Error", "No images found in the images folder.")
                 return
-
 
     def populate_tree_with_camera_data(self, tree_widget):
         """Populate the specified tree widget with camera and image data."""
