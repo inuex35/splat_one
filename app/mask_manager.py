@@ -133,7 +133,7 @@ class MaskManager(QWidget):
             return
 
         # Load the mask if it exists
-        mask_path = os.path.join(self.mask_dir, f"mask_{self.image_name}")
+        mask_path = os.path.join(self.mask_dir, f"{self.image_name}.png")
         if os.path.exists(mask_path):
             self.current_mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
             guru.info(f"Loaded existing mask from {mask_path}")
@@ -148,25 +148,26 @@ class MaskManager(QWidget):
         self.set_image_to_label(rgb_image)
 
     def plot_mask(self, image_name, mask_data):
-        """Overlay mask on the selected image and display it in QLabel."""
+        # Load image from the given path
         image_path = os.path.join(self.img_dir, image_name)
         image = cv2.imread(image_path)
         if image is None:
             QMessageBox.warning(self, "Error", f"Failed to load image {image_name}")
             return
 
-        mask_rgb = cv2.cvtColor(mask_data, cv2.COLOR_GRAY2RGB)
-        mask_overlay = np.zeros_like(mask_rgb)
-        mask_overlay[:, :, 1] = 255  # Green channel for mask overlay
+        # Create a binary mask where black regions (value 0) become white (255)
+        black_region_mask = cv2.threshold(mask_data, 0, 255, cv2.THRESH_BINARY_INV)[1]
+        # Copy the original image to create an overlay
+        overlayed_image = image.copy()
+        # Replace pixels in the overlay where the mask is active with blue (BGR: [255, 0, 0])
+        overlayed_image[black_region_mask == 255] = [255, 0, 0]
 
-        # Blend image and mask overlay
-        overlayed_image = cv2.addWeighted(image, 0.7, mask_rgb, 0.3, 0)
-
-        # Display selected points on the overlay (optional)
+        # Draw selected points on the overlay (optional)
         for idx, point in enumerate(self.input_points):
             color = (0, 255, 0) if self.input_labels[idx] == 1 else (0, 0, 255)
             cv2.circle(overlayed_image, (point[0], point[1]), radius=5, color=color, thickness=-1)
 
+        # Convert the overlayed image from BGR to RGB and display it in the QLabel
         rgb_image = cv2.cvtColor(overlayed_image, cv2.COLOR_BGR2RGB)
         self.set_image_to_label(rgb_image)
 
@@ -241,7 +242,7 @@ class MaskManager(QWidget):
                 multimask_output=False
             )
 
-            mask_output_path = os.path.join(self.mask_dir, f"mask_{image_name}")
+            mask_output_path = os.path.join(self.mask_dir, f"{image_name}.png")
             inverted_mask = 1 - masks[0]
             mask_to_save = (inverted_mask * 255).astype(np.uint8)
             cv2.imwrite(mask_output_path, mask_to_save)
@@ -263,24 +264,21 @@ class MaskManager(QWidget):
         self.display_image_with_mask()
 
     def display_image_with_mask(self):
-        """Overlay the mask on the image and display it, blending only on black mask areas."""
+        # Check if current image and mask exist
         if self.current_image is not None and self.current_mask is not None:
-            black_region_mask = cv2.threshold(self.current_mask, 0, 255, cv2.THRESH_BINARY_INV)[1]
-            black_region_mask_3ch = cv2.cvtColor(black_region_mask, cv2.COLOR_GRAY2BGR)
-            black_region_mask_float = black_region_mask_3ch / 255.0
-
-            blue_overlay = np.zeros_like(self.current_image)
-            blue_overlay[:, :, 0] = 255
-
+            # Create a copy of the original image
             overlay = self.current_image.copy()
-            overlay = overlay * (1 - black_region_mask_float) + \
-                      (self.current_image * 0.3 + blue_overlay * 0.7) * black_region_mask_float
-            overlay = overlay.astype(np.uint8)
-
+            # Create a binary mask where the mask's black areas become white (255)
+            black_region_mask = cv2.threshold(self.current_mask, 0, 255, cv2.THRESH_BINARY_INV)[1]
+            # Set the corresponding pixels in the overlay to blue (BGR: [255, 0, 0])
+            overlay[black_region_mask == 255] = [255, 0, 0]
+            
+            # Draw selected points on the overlay
             for idx, point in enumerate(self.input_points):
                 color = (0, 255, 0) if self.input_labels[idx] == 1 else (0, 0, 255)
                 cv2.circle(overlay, (point[0], point[1]), radius=5, color=color, thickness=-1)
-
+            
+            # Display the modified image
             self.display_image(overlay)
         elif self.current_image is not None:
             self.display_image(self.current_image)
@@ -300,7 +298,7 @@ class MaskManager(QWidget):
     def save_current_mask(self):
         """Save the current mask to a file."""
         if self.current_mask is not None:
-            mask_output_path = os.path.join(self.mask_dir, f"mask_{self.image_name}")
+            mask_output_path = os.path.join(self.mask_dir, f"{self.image_name}.png")
             mask_to_save = self.current_mask.astype(np.uint8)
             cv2.imwrite(mask_output_path, mask_to_save)
             guru.info(f"Mask saved to {mask_output_path}")
