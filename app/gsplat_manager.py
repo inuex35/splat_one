@@ -241,7 +241,7 @@ class GsplatManager(QWidget):
         start_total = time.time()  # Start overall timer
 
         # Retrieve the sample directly from the dictionary
-        data = self.runner.allset_dict.get(image_name)
+        data = self.runner.allset.get_data_by_image_name(image_name)
         if data is None:
             logger.error(f"Image '{image_name}' not found.")
             return

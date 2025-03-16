@@ -330,15 +330,8 @@ class Dataset:
             self.indices = indices[indices % self.parser.test_every == 0]
         else:
             self.indices = indices
-        # Build a lookup dictionary mapping image_name to local index
-        self.build_index()
-
-    def build_index(self):
-        """Build a dictionary mapping image name to local dataset index."""
-        # Iterate over the local indices and map image name to local index
         self.image_name_to_local_idx = {}
         for local_idx, global_idx in enumerate(self.indices):
-            # Assume parser.images[global_idx] is already loaded and has a 'name' attribute
             image_name = self.parser.images[global_idx].name
             self.image_name_to_local_idx[image_name] = local_idx
 

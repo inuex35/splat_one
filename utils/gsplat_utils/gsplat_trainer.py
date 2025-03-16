@@ -319,8 +319,6 @@ class Runner:
         )
         self.valset = Dataset(self.parser, split="val")
         self.allset = Dataset(self.parser, split="all")
-        self.allset_dict = {data["image_name"]: data for data in self.allset}
-
         self.scene_scale = self.parser.scene_scale * 1.1 * cfg.global_scale
         print("Scene scale:", self.scene_scale)
 
@@ -556,7 +554,6 @@ class Runner:
             if self.stop_training:
                 print("Training stopped.")
                 torch.save(data, f"{self.ckpt_dir}/ckpt_{step}_rank{self.world_rank}.pt")
-                print("Model saved.")
                 break
             try:
                 data = next(trainloader_iter)
