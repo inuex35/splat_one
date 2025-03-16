@@ -38,39 +38,35 @@ class Reconstruction(QWidget):
         self.workdir = workdir
         self.reconstruction_file = os.path.join(workdir, "reconstruction.json")
         self.dataset = dataset.DataSet(workdir)
+        self.camera_size = 1.0
 
-        # メインレイアウトの設定
+        self.setFocusPolicy(Qt.StrongFocus)  # Ensure parent widget can receive keyboard events
+        self.setFocus()
+
+        # Set up main layout
         main_layout = QVBoxLayout(self)
         
-        # GLViewWidgetの初期設定
         self.viewer = gl.GLViewWidget()
+        self.viewer.setFocusPolicy(Qt.NoFocus)  # Prevent child widget from capturing key events
         self.viewer.setWindowTitle("Point Cloud and Camera Visualization")
         self.viewer.setCameraPosition(distance=50)
-        
-        # メインレイアウトにGLViewWidgetを追加
         main_layout.addWidget(self.viewer)
         
-        # ボタンを横に並べるためのQHBoxLayoutを追加
         button_layout = QHBoxLayout()
-        
-        # "Run Reconstruction" ボタン
         self.run_button = QPushButton("Run Reconstruction")
         self.run_button.clicked.connect(self.run_reconstruction)
         button_layout.addWidget(self.run_button)
 
-        # "Config" ボタンを同じ行に追加
         self.config_button = QPushButton("Config")
         self.config_button.clicked.connect(self.configure_reconstruction)
         button_layout.addWidget(self.config_button)
         
-        # QVBoxLayoutにボタンのQHBoxLayoutを追加
         main_layout.addLayout(button_layout)
         
-        # カメラアイテムのリストを初期化
+        # Initialize camera items list
         self.camera_items = []
-        
-        # 初期表示の更新
         self.update_visualization()
+
 
     def run_reconstruction(self):
         """Run reconstruction process"""
@@ -96,19 +92,28 @@ class Reconstruction(QWidget):
 
     def configure_reconstruction(self):
         """Open the configuration dialog for feature extraction."""
-        QMessageBox.information(self, "Feature Extraction", "Feature extraction configuration dialog.")
+        #QMessageBox.information(self, "Feature Extraction", "Feature extraction configuration dialog.")
+
+    def keyPressEvent(self, event):
+        # Increase camera size when '+' key is pressed
+        if event.key() == Qt.Key_Plus:
+            self.camera_size *= 1.1
+            self.update_visualization()
+        # Decrease camera size when '-' key is pressed
+        elif event.key() == Qt.Key_Minus:
+            self.camera_size /= 1.1
+            self.update_visualization()
+        else:
+            super().keyPressEvent(event)
 
     def update_visualization(self):
-        """ポイントクラウドとカメラの可視化を更新"""
+        """Update the point cloud and camera visualization."""
         self.viewer.items.clear()
-        # 現在のファイルを取得してデータを読み込む
         data = load_reconstruction(self.reconstruction_file)
         if data is None:
-            # データがない場合、立方体を表示して「No reconstruction」を示す
             self.show_placeholder()
             return
 
-        # ポイントクラウドとカメラのデータを取得
         points, colors, cameras = [], [], []
         for reconstruction in data:
             if "points" not in reconstruction or "shots" not in reconstruction:
@@ -118,54 +123,40 @@ class Reconstruction(QWidget):
             points = np.array([p["coordinates"] for p in reconstruction["points"].values()], dtype=np.float32)
             colors = np.array([p["color"] for p in reconstruction["points"].values()], dtype=np.float32) / 255.0
 
-            # データが空の場合を確認
             if points.size == 0 or colors.size == 0:
-                print("No points or colors in data.")
                 logger.warning("No points or colors in data.")
                 continue
 
-            # カメラデータの設定
             for shot_name, shot in reconstruction["shots"].items():
                 try:
-                    # Get the axis-angle rotation vector
                     axis_angle = np.array(shot.get("rotation", [0, 0, 0]), dtype=np.float64)
-                    # Convert axis-angle to rotation matrix
                     rotation = Rotation.from_rotvec(axis_angle).as_matrix()
-
-                    # Get the translation vector
                     translation = np.array(shot.get("translation", [0, 0, 0]), dtype=np.float64)
-
-                    # Compute the camera position in world coordinates
                     position = -rotation.T @ translation
-
-                    # Camera type
                     cam_type = reconstruction["cameras"][shot["camera"]]["projection_type"]
                     cameras.append((shot_name, rotation, position, cam_type))
                 except Exception as e:
                     logger.error(f"Error processing shot '{shot_name}': {e}")
                     continue
 
-        # ポイントクラウドの表示
         scatter = gl.GLScatterPlotItem(pos=points, color=colors, size=2)
-        scatter.setGLOptions('translucent')  # エラーハンドリングとしての描画設定
+        scatter.setGLOptions('translucent')
         self.viewer.addItem(scatter)
 
-        # カメラの可視化
         for shot_name, R, t, cam_model in cameras:
-            self.add_camera_visualization(shot_name, R, t, cam_model)
+            # Pass the dynamic camera size here
+            self.add_camera_visualization(shot_name, R, t, cam_model, size=self.camera_size)
 
     def add_camera_visualization(self, cam_name, R, t, cam_model, size=1):
         """Visualize camera position and orientation, store in a list."""
         if cam_model in ["spherical", "equirectangular"]:
-            # Visualization for spherical camera models
             sphere_meshdata = pg.opengl.MeshData.sphere(rows=10, cols=20, radius=size)
             sphere = gl.GLMeshItem(meshdata=sphere_meshdata, color=(1, 1, 1, 0.3), smooth=True, shader='balloon')
             sphere.setGLOptions('translucent')
             sphere.translate(t[0], t[1], t[2])
             self.viewer.addItem(sphere)
-            self.camera_items.append((cam_name, sphere, t, R, cam_model))  # Retain cam_model
+            self.camera_items.append((cam_name, sphere, t, R, cam_model))
         else:
-            # Visualization for perspective cameras
             frustum_size = size * 5
             frustum_vertices = np.array([
                 [0, 0, 0],
@@ -175,10 +166,8 @@ class Reconstruction(QWidget):
                 [-1, -1, -2],
             ]) * frustum_size
 
-            # Transform vertices with rotation and translation
             frustum_vertices = frustum_vertices @ - R + t
 
-            # Draw edges of the frustum
             lines = [
                 (frustum_vertices[0], frustum_vertices[1]),
                 (frustum_vertices[0], frustum_vertices[2]),
@@ -190,14 +179,12 @@ class Reconstruction(QWidget):
                 (frustum_vertices[3], frustum_vertices[1])
             ]
 
-            # Save edges and draw
             frustum_edges = []
             for start, end in lines:
                 line = gl.GLLinePlotItem(pos=np.array([start, end]), color=(1, 1, 1, 0.5), width=1, antialias=True)
                 self.viewer.addItem(line)
-                frustum_edges.append(line)  # Save each edge
+                frustum_edges.append(line)
 
-            # Save the frustum edges in camera items
             self.camera_items.append((cam_name, frustum_edges, t, R, cam_model))
 
     def show_placeholder(self):
