@@ -27,7 +27,7 @@ splat_one is an integrated application that combines Gaussian Splatting and Stru
 
 <p align="center">
   <a href="https://www.youtube.com/watch?v=m7eIe_ZGAqQ" target="_blank">
-    <img src="https://github.com/user-attachments/assets/919f2dd9-3954-41df-836b-6b7d3d42a4c6" alt="splat_one_resized" width="600"/>
+    <img src="https://github.com/user-attachments/assets/d6fe24f9-77b5-4a42-b879-c7c79144957d" alt="splat_one_resized" width="600"/>
   </a>
 </p>
 
