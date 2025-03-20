@@ -3,8 +3,8 @@ import json
 import numpy as np
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QTreeWidget, QTreeWidgetItem, QLabel, QPushButton
 from PyQt5.QtGui import QImage, QPixmap
-from PyQt5.QtCore import Qt
-from scipy.spatial.transform import Rotation  # 回転変換用
+from PyQt5.QtCore import Qt, QTimer
+from scipy.spatial.transform import Rotation  # For rotation conversion
 from utils.logger import setup_logger
 import nerfview
 from utils.gsplat_utils.gsplat_trainer import Runner, Config
@@ -16,11 +16,11 @@ import threading
 logger = setup_logger()
 
 def load_reconstruction(file_path: str):
-    """JSONファイルから再構築データを読み込む関数"""
+    """Load reconstruction data from a JSON file."""
     try:
         with open(file_path, 'r') as f:
             data = json.load(f)
-        # "reconstructions" キーがある場合はそのリストを返す
+        # Return list under "reconstructions" key if exists
         if "reconstructions" in data:
             return data["reconstructions"]
         return data
@@ -34,7 +34,7 @@ def load_reconstruction(file_path: str):
 class GsplatManager(QWidget):
     def __init__(self, work_dir, parent=None):
         """
-        work_dir: Working directory. Reconstruction JSON is loaded from here.
+        work_dir: 作業ディレクトリ。ここから再構築 JSON を読み込みます。
         """
         super().__init__(parent)
         self.workdir = work_dir
@@ -55,8 +55,11 @@ class GsplatManager(QWidget):
         # QLabel for rendering result
         self.image_label = QLabel("Rendering result")
         self.image_label.setAlignment(Qt.AlignCenter)
+        
+        # Create overlay buttons (camera mode and auto update)
         self.create_overlay_buttons()
-        # Add a button to start training (or any desired action)
+        
+        # Add a button to start training
         self.start_training_button = QPushButton("Start Training")
         self.start_training_button.clicked.connect(self.start_training)
         
@@ -66,6 +69,10 @@ class GsplatManager(QWidget):
         layout.addWidget(self.start_training_button)
         self.setLayout(layout)
         self.training_running = False
+
+        # Initialize QTimer for auto update
+        self.auto_update_timer = QTimer(self)
+        self.auto_update_timer.timeout.connect(self.auto_update)
 
     def create_overlay_buttons(self):
         # Create a button for perspective mode as a child of image_label
@@ -81,6 +88,14 @@ class GsplatManager(QWidget):
         self.btn_spherical.resize(100, 30)
         self.btn_spherical.move(120, 10)  # Position to the right of perspective
         self.btn_spherical.clicked.connect(lambda: self.set_camera_model("spherical"))
+        
+        # Create a button for auto update as a child of image_label
+        self.btn_auto_update = QPushButton("Auto Update: OFF", self.image_label)
+        self.btn_auto_update.setStyleSheet("background-color: rgba(255, 255, 255, 150);")
+        self.btn_auto_update.resize(130, 30)
+        self.btn_auto_update.move(230, 10)  # Position to the right of spherical
+        self.btn_auto_update.setCheckable(True)
+        self.btn_auto_update.clicked.connect(self.toggle_auto_update)
 
     def set_camera_model(self, model: str):
         # Update the selected camera model and update button styles for visual feedback
@@ -89,61 +104,73 @@ class GsplatManager(QWidget):
             self.btn_perspective.setStyleSheet("background-color: rgba(0, 200, 0, 150);")
             self.btn_spherical.setStyleSheet("background-color: rgba(255, 255, 255, 150);")
             self.move_to_camera(self.selected_image_name)
-
         else:
             self.btn_spherical.setStyleSheet("background-color: rgba(0, 200, 0, 150);")
             self.btn_perspective.setStyleSheet("background-color: rgba(255, 255, 255, 150);")
             self.move_to_camera(self.selected_image_name)
         logger.info(f"Selected camera model: {model}")
 
+    def toggle_auto_update(self):
+        # Toggle the auto update timer based on button state
+        if self.btn_auto_update.isChecked():
+            self.btn_auto_update.setText("Auto Update: ON")
+            self.auto_update_timer.start(1000)  # Update every 1000 ms
+            logger.info("Auto update enabled.")
+        else:
+            self.btn_auto_update.setText("Auto Update: OFF")
+            self.auto_update_timer.stop()
+            logger.info("Auto update disabled.")
+
+    def auto_update(self):
+        # Called by QTimer; update the current image rendering if an image is selected
+        if hasattr(self, "selected_image_name") and self.selected_image_name:
+            self.move_to_camera(self.selected_image_name)
+
     def start_training(self):
         """Toggle: Start training if not running, else signal to stop."""
-        import threading
         if not self.training_running:
-            # Training を開始
+            # Start training
             self.training_running = True
             self.start_training_button.setText("Stop Training")
-            self.runner.stop_training = False  # 停止フラグをリセット
+            self.runner.stop_training = False  # Reset stop flag
             self.train_thread = threading.Thread(target=self.runner.train)
             self.train_thread.daemon = True
             self.train_thread.start()
             logger.info("Training started in background.")
         else:
-            # Training を停止
+            # Stop training
             self.runner.stop_training = True
             self.training_running = False
             self.start_training_button.setText("Start Training")
             logger.info("Training stop requested.")
 
     def load_camera_data(self):
-        """JSONから再構築データを読み取り、ポイントクラウドとカメラ情報を抽出する"""
+        """Load reconstruction data from JSON and extract point cloud and camera information."""
         data = load_reconstruction(self.reconstruction_json_path)
         if data is None:
             logger.error("再構築データが読み込めませんでした。")
             return
 
-        # ここでは最初の再構築データのみを利用する例
+        # Use only the first reconstruction as an example
         reconstruction = data[0]
         if "points" not in reconstruction or "shots" not in reconstruction:
             logger.warning("Data format is incorrect; missing 'points' or 'shots'")
             return
 
-
-        self.cameras = []  # 初期化
+        self.cameras = []  # Initialize list
         for shot_name, shot in reconstruction["shots"].items():
             try:
-
-                # 軸角（axis-angle）形式の回転情報を取得し、回転行列に変換
+                # Convert axis-angle rotation to rotation matrix
                 axis_angle = np.array(shot.get("rotation", [0, 0, 0]), dtype=np.float64)
                 rotation = Rotation.from_rotvec(axis_angle).as_matrix()
 
-                # 平行移動（translation）の取得
+                # Get translation
                 translation = np.array(shot.get("translation", [0, 0, 0]), dtype=np.float64)
 
-                # カメラ位置は、rotation.T の逆変換で translation を適用（例）
+                # Compute camera position using inverse transformation of rotation.T on translation
                 position = -rotation.T @ translation
 
-                # カメラの種類
+                # Camera type
                 cam_type = reconstruction["cameras"][shot["camera"]]["projection_type"]
                 cam_name = shot["camera"]
                 self.cameras.append((shot_name, rotation, position, cam_type, cam_name))
@@ -217,31 +244,30 @@ class GsplatManager(QWidget):
                 xys = np.array([0, 0])
                 point3D_ids = np.array([0, 0])
                 self.images[image_id] = Image(id=image_id, qvec=qvec, tvec=tvec, camera_id=camera_id, name=image_name, xys=xys, point3D_ids=point3D_ids, diff_ref=diff_ref)
-        #return cameras, images
 
     def on_camera_item_clicked(self, item, column):
-        """ツリービューのカメラがクリックされたとき、そのカメラ位置でレンダリングを実行する"""
+        """When a camera in the tree view is clicked, render from its position."""
         shot_name = item.text(0)
         self.move_to_camera(shot_name)
 
     def on_camera_image_tree_click(self, image_name):
-        """シングルクリックされた画像に関連付けられたカメラをハイライト"""
+        """Highlight the camera corresponding to the clicked image."""
         self.move_to_camera(image_name)
 
     def on_camera_image_tree_double_click(self, image_name):
-        """ダブルクリックされた画像に関連付けられたカメラ位置に移動"""
+        """Move to the camera position associated with the double-clicked image."""
         self.move_to_camera(image_name)
 
     def move_to_camera(self, image_name):
         """
-        指定された画像名に対応するカメラ位置へビューを移動する処理。
-        辞書から直接データを取得することで、全件走査のオーバーヘッドを削減します。
+        Move the view to the camera position corresponding to the specified image.
+        Retrieves the data directly from the dictionary to reduce overhead.
         """
         self.selected_image_name = image_name
         import time
         start_total = time.time()  # Start overall timer
 
-        # Retrieve the sample directly from the dictionary
+        # Retrieve the sample directly from the dataset using image name
         data = self.runner.allset.get_data_by_image_name(image_name)
         if data is None:
             logger.error(f"Image '{image_name}' not found.")
@@ -257,14 +283,16 @@ class GsplatManager(QWidget):
         # Construct the CameraState
         camera_state = nerfview.CameraState(
             fov=90,
-            aspect=2.0,
+            aspect=1.0,
             c2w=c2w,
         )
 
-        # 自動的に画像サイズを取得（data["image"] の shape から）
+        # Get image size from the data tensor shape
         img_tensor = data["image"]
         h, w, _ = img_tensor.shape
         img_wh = (w, h)  # (width, height)
+        if self.selected_cam_model == "pinhole":
+            h = w
 
         # Measure rendering time
         render_start = time.time()
@@ -291,15 +319,14 @@ class GsplatManager(QWidget):
             f"PostProcessing={post_time:.4f}s, Total={total_time:.4f}s"
         )
 
-
 if __name__ == "__main__":
     from PyQt5.QtWidgets import QApplication
     import sys
     app = QApplication(sys.argv)
 
-    # 作業ディレクトリの例
+    # Example working directory
     workdir = "./workdir"
-    # Runner の初期化（Viewerは不要なのでdisable_viewer=True）
+    # Initialize Runner (viewer disabled)
     cfg = Config(
         data_dir=workdir,
         result_dir=os.path.join(workdir, "results"),
@@ -308,9 +335,9 @@ if __name__ == "__main__":
     )
     runner = Runner(local_rank=0, world_rank=0, world_size=1, cfg=cfg)
     
-    # 画像の位置情報を記述したJSONファイルのパス（例：image_poses.json）
+    # Example JSON file path for image poses (e.g., image_poses.json)
     pose_json_path = os.path.join(workdir, "image_poses.json")
     
-    widget = GsplatManager(runner, pose_json_path)
+    widget = GsplatManager(workdir)
     widget.show()
     sys.exit(app.exec_())
