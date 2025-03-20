@@ -158,11 +158,41 @@ class GsplatManager(QWidget):
             self.btn_auto_update.setText("Auto Update: OFF")
             self.auto_update_timer.stop()
             logger.info("Auto update disabled.")
-
+            
     def auto_update(self):
-        # Called by QTimer; update the current image rendering if an image is selected
-        if hasattr(self, "selected_image_name") and self.selected_image_name:
-            self.move_to_camera(self.selected_image_name)
+        # 現在のカメラ位置を使って更新する
+        if hasattr(self, "camera_state"):
+            self.render_current_camera()
+
+    def render_current_camera(self):
+        # 現在のカメラ位置でレンダリングし直す関数
+        if not hasattr(self, "camera_state"):
+            return
+
+        # 現在の選択画像からサイズ情報を取得
+        data = self.runner.allset.get_data_by_image_name(self.selected_image_name)
+        if data is None:
+            logger.error(f"Image '{self.selected_image_name}' not found.")
+            return
+
+        img_tensor = data["image"]
+        h, w, _ = img_tensor.shape
+        img_wh = (w, h)
+        if self.selected_cam_model == "pinhole":
+            h = w
+
+        # レンダリング実行
+        render = self.runner._viewer_render_fn(self.camera_state, img_wh, camera_model=self.selected_cam_model)
+        render_uint8 = (np.clip(render, 0, 1) * 255).astype(np.uint8)
+        height, width, channels = render_uint8.shape
+        bytes_per_line = channels * width
+        qimage = QImage(render_uint8.data, width, height, bytes_per_line, QImage.Format_RGB888)
+        pixmap = QPixmap.fromImage(qimage)
+
+        # QLabelにフィットするようにスケーリング
+        scaled_pixmap = pixmap.scaled(self.image_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.image_label.setPixmap(scaled_pixmap)
+
 
     def start_training(self):
         """Toggle: Start training if not running, else signal to stop."""
