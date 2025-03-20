@@ -45,7 +45,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libcgal-dev \
         graphviz \
         mesa-utils \
-        libgraphviz-dev && \
+        libgraphviz-dev \
+        wget && \
     rm -rf /var/lib/apt/lists/*
 
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1 && \
