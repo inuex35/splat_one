@@ -45,8 +45,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libcgal-dev \
         graphviz \
         mesa-utils \
-        libgraphviz-dev \
-        wget && \
+        libgraphviz-dev && \
     rm -rf /var/lib/apt/lists/*
 
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1 && \
@@ -175,7 +174,7 @@ RUN pip install --no-cache-dir --upgrade cloudpickle && \
     pip install --no-cache-dir opencv-python-headless && \
     pip install --no-cache-dir "PyOpenGL==3.1.1a1" "PyQt5"
 
-RUN mkdir -p /root/.cache/torch/hub/checkpoints && \ wget https://download.pytorch.org/models/alexnet-owt-7be5be79.pth -O /root/.cache/torch/hub/checkpoints/alexnet-owt-7be5be79.pth
+RUN apt install wget && mkdir -p /root/.cache/torch/hub/checkpoints && wget https://download.pytorch.org/models/alexnet-owt-7be5be79.pth -O /root/.cache/torch/hub/checkpoints/alexnet-owt-7be5be79.pth
 
 # Set the working directory
 WORKDIR /source/splat_one
