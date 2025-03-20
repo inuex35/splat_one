@@ -13,15 +13,17 @@ from PyQt5.QtWidgets import (
     QLineEdit,
     QDialogButtonBox,
     QCheckBox,
-    QComboBox
+    QComboBox,
+    QProgressBar
 )
 from PyQt5.QtGui import QPixmap, QImage, QIntValidator, QDoubleValidator
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
+
 from opensfm import dataset
 from opensfm.actions import detect_features
 from opensfm import features
 import yaml
-
+import time
 
 class ConfigDialog(QDialog):
     # Store the remembered position as a class variable
@@ -214,6 +216,70 @@ class ConfigDialog(QDialog):
         QMessageBox.information(self, "Config", "Configuration saved successfully.")
         self.accept()
 
+class ProgressWindow(QWidget):
+    def __init__(self, total_images):
+        super().__init__()
+        self.setWindowTitle("Processing Progress")
+        self.setFixedSize(400, 100)
+
+        layout = QVBoxLayout()
+        self.label = QLabel("Processing images...")
+        self.label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.label)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setMaximum(total_images)
+        layout.addWidget(self.progress_bar)
+
+        self.setLayout(layout)
+
+    def update_progress(self, processed_images):
+        self.progress_bar.setValue(processed_images)
+        self.label.setText(f"Feature extraction: {processed_images} / {self.progress_bar.maximum()} images")
+
+class ProgressMonitorThread(QThread):
+    progress = pyqtSignal(int)
+    stopped = pyqtSignal()
+
+    def __init__(self, feature_folder, total_images):
+        super().__init__()
+        self.feature_folder = feature_folder
+        self.total_images = total_images
+        self._is_running = True
+
+    def run(self):
+        while self._is_running:
+            processed_count = self.count_feature_files()
+            self.progress.emit(processed_count)
+            if processed_count >= self.total_images:
+                break
+            time.sleep(0.5)  # 0.5秒間隔で更新
+
+        if not self._is_running:
+            self.stopped.emit()
+
+    def stop(self):
+        self._is_running = False
+
+    def count_feature_files(self):
+        return len([f for f in os.listdir(self.feature_folder) if f.endswith('.features.npz')])
+
+
+class FeatureExtractionThread(QThread):
+    finished = pyqtSignal()
+    error = pyqtSignal(str)
+
+    def __init__(self, dataset):
+        super().__init__()
+        self.dataset = dataset
+
+    def run(self):
+        try:
+            detect_features.run_dataset(self.dataset)
+            self.finished.emit()
+        except Exception as e:
+            self.error.emit(str(e))
+
 
 class FeatureExtractor(QWidget):
     def __init__(self, workdir, image_list):
@@ -221,40 +287,95 @@ class FeatureExtractor(QWidget):
         self.workdir = workdir
         self.image_list = image_list
         self.dataset = dataset.DataSet(workdir)
-        self.current_image = None  # Variable to hold the current image data
+        self.current_image = None
         self.config_path = os.path.join(workdir, "config.yaml")
         self.config_data = self.load_config_data(self.config_path)
 
-        # --- UI setup with a vertical layout ---
         layout = QVBoxLayout()
-
-        # Add space above and below to center the content
         layout.addStretch(1)
 
-        # 1) Initially display "Select an image to view features." (do not auto-load)
         self.display_label = QLabel("Select an image to view features.")
-        self.display_label.setStyleSheet("color: gray; font-size: 16px;")  # Example to make it more visible
         self.display_label.setAlignment(Qt.AlignCenter)
-        self.display_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        layout.addWidget(self.display_label, alignment=Qt.AlignVCenter)
+        layout.addWidget(self.display_label)
 
         layout.addStretch(1)
 
-        # --- Bottom button layout ---
-        button_layout = QHBoxLayout()
-
-        # Extract Features Button
         self.extract_button = QPushButton("Extract Features")
-        self.extract_button.clicked.connect(self.run_detect_features)
-        button_layout.addWidget(self.extract_button)
+        self.extract_button.clicked.connect(self.toggle_feature_extraction)
+        layout.addWidget(self.extract_button)
 
-        # Config Button
-        self.config_button = QPushButton("Config")
-        self.config_button.clicked.connect(self.configure_features)
-        button_layout.addWidget(self.config_button)
-
-        layout.addLayout(button_layout)
         self.setLayout(layout)
+
+        self.progress_window = None
+        self.feature_thread = None
+        self.monitor_thread = None
+        self.processing = False
+        self.feature_folder = os.path.join(self.workdir, "features")
+
+    def toggle_feature_extraction(self):
+        if not self.processing:
+            self.start_feature_extraction()
+        else:
+            self.stop_feature_extraction()
+
+    def start_feature_extraction(self):
+        total_images = len(self.image_list)
+        self.progress_window = ProgressWindow(total_images)
+        self.progress_window.show()
+
+        # 特徴抽出スレッド開始
+        self.feature_thread = FeatureExtractionThread(self.dataset)
+        self.feature_thread.finished.connect(self.on_feature_extraction_finished)
+        self.feature_thread.error.connect(self.on_feature_extraction_error)
+        self.feature_thread.start()
+
+        # 進捗監視スレッド開始
+        self.monitor_thread = ProgressMonitorThread(self.feature_folder, total_images)
+        self.monitor_thread.progress.connect(self.update_progress_window)
+        self.monitor_thread.stopped.connect(self.on_feature_extraction_stopped)
+        self.monitor_thread.start()
+
+        self.processing = True
+        self.extract_button.setText("Stop Feature Extraction")
+
+    def stop_feature_extraction(self):
+        if self.monitor_thread:
+            self.monitor_thread.stop()
+        self.extract_button.setEnabled(False)
+        if self.progress_window:
+            self.progress_window.close() 
+
+    def update_progress_window(self, processed_images):
+        if self.progress_window:
+            self.progress_window.update_progress(processed_images)
+
+    def on_feature_extraction_finished(self):
+        if self.monitor_thread:
+            self.monitor_thread._is_running = False
+        self.processing = False
+        self.extract_button.setText("Extract Features")
+        self.extract_button.setEnabled(True)
+        if self.progress_window:
+            self.progress_window.close()  # Progressウィンドウを閉じる
+            QMessageBox.information(self, "Completed", "Feature extraction completed.")
+
+    def on_feature_extraction_error(self, error_message):
+        if self.monitor_thread:
+            self.monitor_thread._is_running = False
+        self.processing = False
+        self.extract_button.setText("Extract Features")
+        self.extract_button.setEnabled(True)
+        if self.progress_window:
+            self.progress_window.close()  # Progressウィンドウを閉じる
+            QMessageBox.critical(self, "Error", f"Error:\n{error_message}")
+
+    def on_feature_extraction_stopped(self):
+        self.processing = False
+        self.extract_button.setText("Extract Features")
+        self.extract_button.setEnabled(True)
+        if self.progress_window:
+            self.progress_window.close()
+
 
     def resizeEvent(self, event):
         """Handle the resize event to adjust the image size to fit the QLabel area."""
@@ -278,11 +399,6 @@ class FeatureExtractor(QWidget):
             self.plot_features(image_name, features_data)
         except FileNotFoundError:
             self.show_original_image(image_name)
-
-    def run_detect_features(self):
-        """Run feature detection on all images in the dataset."""
-        detect_features.run_dataset(self.dataset)
-        QMessageBox.information(self, "Feature Extraction", "Feature extraction completed for all images.")
 
     def configure_features(self):
         """Open the configuration dialog for feature extraction."""

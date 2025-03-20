@@ -5,9 +5,9 @@ import json
 import shutil
 import importlib.util
 from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QToolBar, QAction, QFileDialog, QMessageBox,
+    QApplication, QMainWindow, QToolBar, QFileDialog, QMessageBox,
     QDialog, QVBoxLayout, QPushButton, QLabel, QWidget, QTabWidget, QSplitter,
-    QListWidget, QListWidgetItem, QTreeWidget, QTreeWidgetItem, QTextEdit, QTableWidget, QTableWidgetItem, QComboBox
+    QTreeWidget, QTreeWidgetItem, QTableWidget, QTableWidgetItem, QComboBox
 )
 from PyQt5.QtCore import Qt, QTimer
 from opensfm.dataset import DataSet
@@ -17,6 +17,20 @@ from app.feature_matching import FeatureMatching  # 新しく追加
 from app.point_cloud_visualizer import Reconstruction  # Import the PointCloudVisualizer class
 from app.gsplat_manager import GsplatManager  # 新しく追加
 
+class ExifExtractProgressDialog(QDialog):
+    def __init__(self, message="Please Wait...", parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Extracting EXIF Data")
+        self.setModal(True)
+        self.setFixedSize(320, 120)
+
+        layout = QVBoxLayout()
+        label = QLabel(message)
+        label.setAlignment(Qt.AlignCenter)
+        label.setStyleSheet("font-size: 14px; padding: 10px;")  # フォントを調整
+        layout.addWidget(label)
+
+        self.setLayout(layout)
 
 class CameraModelEditor(QDialog):
     """カメラモデル編集ダイアログ"""
@@ -157,11 +171,16 @@ def load_camera_models(workdir):
     return merged_models
 
 
-def open_camera_model_editor(main_app):
+def open_camera_model_editor(self):
     """カメラモデルエディターを開く"""
-    dialog = CameraModelEditor(main_app.camera_models, main_app.workdir, parent=main_app)
-    if dialog.exec_():
-        main_app.camera_models = load_camera_models(main_app.workdir)
+    if self.workdir:
+        self.camera_models = load_camera_models(self.workdir)
+        dialog = CameraModelEditor(self.camera_models, self.workdir, parent=self)
+        if dialog.exec_():
+            # 保存後に再読み込み
+            self.camera_models = load_camera_models(self.workdir)
+    else:
+        QMessageBox.warning(self, "Error", "Workdirが設定されていません。")
         
 class MaskManagerWidget(QWidget):
     def __init__(self, parent=None):
@@ -263,6 +282,15 @@ class MainApp(QMainWindow):
 
         # Connect signals
         self.camera_image_tree.itemClicked.connect(self.display_image_and_exif)
+
+        camera_model_button = QPushButton("Edit Camera Models")
+        camera_model_button.clicked.connect(self.open_camera_model_editor)
+        button_widget = QWidget()
+        button_layout = QVBoxLayout()
+        button_layout.addWidget(camera_model_button)
+        button_layout.setAlignment(Qt.AlignTop)
+        button_widget.setLayout(button_layout)
+        right_splitter.addWidget(button_widget)
 
     def init_masks_tab(self):
         """Initialize the Masks tab."""
@@ -471,7 +499,7 @@ class MainApp(QMainWindow):
                 self.matching_tab_initialized = True
 
     def show_start_dialog(self):
-        """起動時にワークディレクトリを選択し、カメラモデルを編集する"""
+        """起動時にワークディレクトリを選択"""
         self.workdir = QFileDialog.getExistingDirectory(self, "Select Workdir")
         if not self.workdir:
             QMessageBox.warning(self, "Error", "No workdir selected. Exiting.")
@@ -479,51 +507,91 @@ class MainApp(QMainWindow):
 
         self.load_workdir()
 
+        exif_dir = os.path.join(self.workdir, "exif")
+
+        # すべての画像に対応するEXIFが存在するか確認
+        exif_exists_for_all_images = all(
+            os.path.exists(os.path.join(exif_dir, f"{image}.exif"))
+            for image in self.image_list
+        )
+
         self.camera_models = load_camera_models(self.workdir)
-        open_camera_model_editor(self)
+
+        # 1つでもEXIFが欠けている場合に表示
+        if not exif_exists_for_all_images:
+            self.open_camera_model_editor()
 
     def load_workdir(self):
-        """Load the work directory and initialize MaskManager."""
-        if not self.workdir:  # もし workdir が未設定なら選択ダイアログを開く
+        if not self.workdir:
             self.workdir = QFileDialog.getExistingDirectory(self, "Select Workdir")
             if not self.workdir:
                 return
 
-        # images フォルダの確認
         img_dir = os.path.join(self.workdir, "images")
         exif_dir = os.path.join(self.workdir, "exif")
+
         if not os.path.exists(img_dir):
             QMessageBox.warning(self, "Error", "images folder does not exist.")
             sys.exit(1)
-        else:
+
+        self.image_list = [
+            f for f in os.listdir(img_dir)
+            if f.lower().endswith(('.png', '.jpg', '.jpeg'))
+        ]
+
+        exif_exists_for_all_images = all(
+            os.path.exists(os.path.join(exif_dir, f"{image}.exif"))
+            for image in self.image_list
+        )
+
+        if not exif_exists_for_all_images:
+            progress_dialog = ExifExtractProgressDialog("Please wait...", self)
+            progress_dialog.show()
+            QApplication.processEvents()
+
             try:
                 dataset = DataSet(self.workdir)
-
                 config_src = "config/config.yaml"
                 config_dest = os.path.join(self.workdir, "config.yaml")
                 shutil.copy(config_src, config_dest)
+
                 from opensfm.actions import extract_metadata
                 extract_metadata.run_dataset(dataset)
+
+                self.camera_models = load_camera_models(self.workdir)
+                progress_dialog.close()
+
+                # EXIF抽出後にCameraModelエディターを表示
+                self.open_camera_model_editor()
+                self.camera_model_configured = True
+
             except Exception as e:
-                pass#QMessageBox.warning(self, "Error", f"Failed to extract metadata or copy config.yaml: {e}")
+                progress_dialog.close()
+                QMessageBox.warning(self, "Error", f"Failed to extract metadata or copy config.yaml: {e}")
+        else:
+            self.camera_models = load_camera_models(self.workdir)
 
-            # masks フォルダの作成または確認
-            mask_dir = os.path.join(self.workdir, "masks")
-            if not os.path.exists(mask_dir):
-                os.makedirs(mask_dir, exist_ok=True)
+        # masksフォルダ作成
+        mask_dir = os.path.join(self.workdir, "masks")
+        if not os.path.exists(mask_dir):
+            os.makedirs(mask_dir, exist_ok=True)
 
-            # 画像リストの作成
-            self.image_list = [
-                f for f in os.listdir(img_dir)
-                if f.lower().endswith(('.png', '.jpg', '.jpeg'))
-            ]
+        if self.image_list:
+            self.populate_tree_with_camera_data(self.camera_image_tree)
+        else:
+            QMessageBox.warning(self, "Error", "No images found in the images folder.")
 
-            if self.image_list:
-                self.populate_tree_with_camera_data(self.camera_image_tree)
-                QMessageBox.information(self, "Success", "Workdir loaded successfully.")
-            else:
-                QMessageBox.warning(self, "Error", "No images found in the images folder.")
-                return
+
+    def open_camera_model_editor(self):
+        """カメラモデルエディターを開く"""
+        if self.workdir:
+            self.camera_models = load_camera_models(self.workdir)
+            dialog = CameraModelEditor(self.camera_models, self.workdir, parent=self)
+            if dialog.exec_():
+                # 保存後に再読み込み
+                self.camera_models = load_camera_models(self.workdir)
+        else:
+            QMessageBox.warning(self, "Error", "Workdirが設定されていません。")
 
     def populate_tree_with_camera_data(self, tree_widget):
         """Populate the specified tree widget with camera and image data."""
