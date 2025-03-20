@@ -50,11 +50,12 @@ class GsplatManager(QWidget):
         
         # Load camera data from JSON
         self.load_camera_data()
+        self.selected_cam_model = None
 
         # QLabel for rendering result
         self.image_label = QLabel("Rendering result")
         self.image_label.setAlignment(Qt.AlignCenter)
-        
+        self.create_overlay_buttons()
         # Add a button to start training (or any desired action)
         self.start_training_button = QPushButton("Start Training")
         self.start_training_button.clicked.connect(self.start_training)
@@ -65,6 +66,35 @@ class GsplatManager(QWidget):
         layout.addWidget(self.start_training_button)
         self.setLayout(layout)
         self.training_running = False
+
+    def create_overlay_buttons(self):
+        # Create a button for perspective mode as a child of image_label
+        self.btn_perspective = QPushButton("Pinhole", self.image_label)
+        self.btn_perspective.setStyleSheet("background-color: rgba(255, 255, 255, 150);")
+        self.btn_perspective.resize(100, 30)
+        self.btn_perspective.move(10, 10)  # Position at top-left
+        self.btn_perspective.clicked.connect(lambda: self.set_camera_model("pinhole"))
+
+        # Create a button for spherical mode as a child of image_label
+        self.btn_spherical = QPushButton("Spherical", self.image_label)
+        self.btn_spherical.setStyleSheet("background-color: rgba(255, 255, 255, 150);")
+        self.btn_spherical.resize(100, 30)
+        self.btn_spherical.move(120, 10)  # Position to the right of perspective
+        self.btn_spherical.clicked.connect(lambda: self.set_camera_model("spherical"))
+
+    def set_camera_model(self, model: str):
+        # Update the selected camera model and update button styles for visual feedback
+        self.selected_cam_model = model
+        if model == "pinhole":
+            self.btn_perspective.setStyleSheet("background-color: rgba(0, 200, 0, 150);")
+            self.btn_spherical.setStyleSheet("background-color: rgba(255, 255, 255, 150);")
+            self.move_to_camera(self.selected_image_name)
+
+        else:
+            self.btn_spherical.setStyleSheet("background-color: rgba(0, 200, 0, 150);")
+            self.btn_perspective.setStyleSheet("background-color: rgba(255, 255, 255, 150);")
+            self.move_to_camera(self.selected_image_name)
+        logger.info(f"Selected camera model: {model}")
 
     def start_training(self):
         """Toggle: Start training if not running, else signal to stop."""
@@ -193,36 +223,6 @@ class GsplatManager(QWidget):
         """ツリービューのカメラがクリックされたとき、そのカメラ位置でレンダリングを実行する"""
         shot_name = item.text(0)
         self.move_to_camera(shot_name)
-        """
-        # カメラ情報を検索
-        for cam in self.cameras:
-            if cam[0] == shot_name:
-                _, rotation, position, cam_type = cam
-                # ここでは c2w 行列を、回転行列と平行移動から構築する例
-                c2w = np.eye(4)
-                c2w[:3, :3] = rotation  # 回転部分
-                c2w[:3, 3] = position  # 位置情報
-                #camera_param = self.runner.get_camera_param(cam_type)
-                # JSONから取得したカメラ情報を用いてカメラ状態を構築
-                camera_state = nerfview.CameraState(
-                fov=90 / 180.0 * np.pi,
-                aspect=1.0,
-                c2w=c2w,
-                )
-                # 表示解像度（例：640x480）
-                img_wh = (640, 480)
-                # Runner の _viewer_render_fn() を呼び出してレンダリングを実行
-                render = self.runner.rasterize_splats(camera_state, img_wh)
-                # 取得した画像データは [0,1] の範囲と仮定
-                render_uint8 = (np.clip(render, 0, 1) * 255).astype(np.uint8)
-                height, width, channels = render_uint8.shape
-                bytes_per_line = channels * width
-                qimage = QImage(render_uint8.data, width, height, bytes_per_line, QImage.Format_RGB888)
-                pixmap = QPixmap.fromImage(qimage)
-                self.image_label.setPixmap(pixmap)
-                logger.info(f"{shot_name} の位置でレンダリングを実行しました。")
-                break
-        """
 
     def on_camera_image_tree_click(self, image_name):
         """シングルクリックされた画像に関連付けられたカメラをハイライト"""
@@ -237,6 +237,7 @@ class GsplatManager(QWidget):
         指定された画像名に対応するカメラ位置へビューを移動する処理。
         辞書から直接データを取得することで、全件走査のオーバーヘッドを削減します。
         """
+        self.selected_image_name = image_name
         import time
         start_total = time.time()  # Start overall timer
 
@@ -256,7 +257,7 @@ class GsplatManager(QWidget):
         # Construct the CameraState
         camera_state = nerfview.CameraState(
             fov=90,
-            aspect=1.0,
+            aspect=2.0,
             c2w=c2w,
         )
 
@@ -267,7 +268,7 @@ class GsplatManager(QWidget):
 
         # Measure rendering time
         render_start = time.time()
-        render = self.runner._viewer_render_fn(camera_state, img_wh)
+        render = self.runner._viewer_render_fn(camera_state, img_wh, camera_model=self.selected_cam_model)
         render_time = time.time() - render_start
 
         # Measure post-processing time and scale the image to fit the label

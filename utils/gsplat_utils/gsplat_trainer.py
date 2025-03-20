@@ -450,12 +450,15 @@ class Runner:
         width: int,
         height: int,
         masks: Optional[Tensor] = None,
+        camera_model: Optional[str] = None,
         **kwargs,
     ) -> Tuple[Tensor, Tensor, Dict]:
         means = self.splats["means"]
         quats = self.splats["quats"]
         scales = torch.exp(self.splats["scales"])
         opacities = torch.sigmoid(self.splats["opacities"])
+        if camera_model == None:
+            camera_model = self.cfg.camera_model
 
         image_ids = kwargs.pop("image_ids", None)
         if self.cfg.app_opt:
@@ -486,7 +489,7 @@ class Runner:
             sparse_grad=self.cfg.sparse_grad,
             rasterize_mode=rasterize_mode,
             distributed=self.world_size > 1,
-            camera_model=self.cfg.camera_model,
+            camera_model=camera_model,
             **kwargs,
         )
         if masks is not None:
@@ -911,7 +914,7 @@ class Runner:
         self.eval(step=step, stage="compress")
 
     @torch.no_grad()
-    def _viewer_render_fn(self, camera_state: nerfview.CameraState, img_wh: Tuple[int, int]):
+    def _viewer_render_fn(self, camera_state: nerfview.CameraState, img_wh: Tuple[int, int], camera_model: str = None) -> np.ndarray:
         W, H = img_wh
         c2w = camera_state.c2w
         K = camera_state.get_K(img_wh)
@@ -932,6 +935,7 @@ class Runner:
             height=H,
             sh_degree=self.cfg.sh_degree,
             radius_clip=3.0,
+            camera_model=camera_model,
         )
         return render_colors[0].cpu().numpy()
 
