@@ -13,14 +13,68 @@ from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialogButtonBox,
-    QMessageBox
+    QMessageBox,
+    QProgressBar
 )
 from PyQt5.QtGui import QPixmap, QImage, QIntValidator, QDoubleValidator
 from PyQt5.QtCore import Qt
 from opensfm import dataset, matching, features 
 from opensfm.actions import match_features
 import yaml
+import time
+from PyQt5.QtCore import QThread, pyqtSignal
 
+class ProgressWindow(QWidget):
+    def __init__(self, total_pairs):
+        super().__init__()
+        self.setWindowTitle("Matching Progress")
+        self.setFixedSize(400, 100)
+
+        layout = QVBoxLayout()
+        self.label = QLabel("Matching image pairs...")
+        self.label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.label)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setMaximum(total_pairs)
+        layout.addWidget(self.progress_bar)
+
+        self.setLayout(layout)
+
+    def update_progress(self, matched_pairs):
+        self.progress_bar.setValue(matched_pairs)
+        self.label.setText(f"Matching pairs: {matched_pairs} / {self.progress_bar.maximum()}")
+
+class MatchingMonitorThread(QThread):
+    progress = pyqtSignal(int)
+
+    def __init__(self, total_pairs):
+        super().__init__()
+        self.total_pairs = total_pairs
+        self._running = True
+
+    def run(self):
+        while self._running:
+            with matching.matching_progress_lock:
+                current_progress = matching.matching_progress_counter
+            self.progress.emit(current_progress)
+            if current_progress >= self.total_pairs:
+                break
+            time.sleep(0.5)
+
+    def stop(self):
+        self._running = False
+
+class MatchingThread(QThread):
+    finished = pyqtSignal()
+
+    def __init__(self, dataset):
+        super().__init__()
+        self.dataset = dataset
+
+    def run(self):
+        match_features.run_dataset(self.dataset)
+        self.finished.emit()
 
 class MatchingConfigDialog(QDialog):
     """Feature Matching Configuration Dialog"""
@@ -292,9 +346,30 @@ class FeatureMatching(QWidget):
                 self.plot_combined_keypoints(pixels_left, pixels_right)
 
     def run_match_features(self):
-        """Run feature detection on all images in the dataset."""
-        match_features.run_dataset(self.dataset)
-        QMessageBox.information(self, "Feature Matching", "Feature Matching completed for all images.")
+        images = self.dataset.images()
+        pairs, _ = matching.calculate_pairs_to_eval(self.dataset, {}, images, images)
+        total_pairs = len(pairs)
+
+        if total_pairs == 0:
+            QMessageBox.warning(self, "Warning", "No pairs to match.")
+            return
+
+        self.progress_window = ProgressWindow(total_pairs)
+        self.progress_window.show()
+
+        self.matching_thread = MatchingThread(self.dataset)
+        self.matching_thread.finished.connect(self.on_matching_finished)
+        self.matching_thread.start()
+
+        self.monitor_thread = MatchingMonitorThread(total_pairs)
+        self.monitor_thread.progress.connect(self.progress_window.update_progress)
+        self.monitor_thread.start()
+
+    def on_matching_finished(self):
+        self.monitor_thread.stop()
+        self.monitor_thread.wait()
+        self.progress_window.close()
+        QMessageBox.information(self, "Feature Matching", "Feature Matching completed.")
 
 
     def configure_matching(self):
