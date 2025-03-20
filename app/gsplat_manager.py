@@ -1,7 +1,7 @@
 import os
 import json
 import numpy as np
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QTreeWidget, QTreeWidgetItem, QLabel, QPushButton
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QDoubleSpinBox
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtCore import Qt, QTimer
 from scipy.spatial.transform import Rotation  # For rotation conversion
@@ -34,12 +34,12 @@ def load_reconstruction(file_path: str):
 class GsplatManager(QWidget):
     def __init__(self, work_dir, parent=None):
         """
-        work_dir: 作業ディレクトリ。ここから再構築 JSON を読み込みます。
+        work_dir: Working directory. Reconstruction JSON is loaded from here.
         """
         super().__init__(parent)
+        self.setFocusPolicy(Qt.StrongFocus)  # Enable key events in parent widget
         self.workdir = work_dir
         self.reconstruction_json_path = os.path.join(self.workdir, "reconstruction.json")
-        # Initialize Runner (disable viewer)
         cfg = Config(
             data_dir=self.workdir,
             result_dir=os.path.join(self.workdir, "results"),
@@ -47,25 +47,50 @@ class GsplatManager(QWidget):
             max_steps=30000
         )
         self.runner = Runner(local_rank=0, world_rank=0, world_size=1, cfg=cfg)
-        
-        # Load camera data from JSON
         self.load_camera_data()
         self.selected_cam_model = None
 
-        # QLabel for rendering result
+        # Set default configurable parameters
+        self.translation_delta = 0.1
+        self.rotation_delta = np.deg2rad(5)  # in radians
+
+        # Create QLabel for rendering result and disable its focus
         self.image_label = QLabel("Rendering result")
         self.image_label.setAlignment(Qt.AlignCenter)
-        
+        self.image_label.setFocusPolicy(Qt.NoFocus)
+
         # Create overlay buttons (camera mode and auto update)
         self.create_overlay_buttons()
-        
-        # Add a button to start training
+
+        # Create training button and disable its focus
         self.start_training_button = QPushButton("Start Training")
         self.start_training_button.clicked.connect(self.start_training)
-        
-        # Set up layout
+        self.start_training_button.setFocusPolicy(Qt.NoFocus)
+
+        # Create spin boxes to configure translation and rotation step
+        self.translation_spin = QDoubleSpinBox(self)
+        self.translation_spin.setRange(0.01, 10.0)
+        self.translation_spin.setSingleStep(0.01)
+        self.translation_spin.setValue(self.translation_delta)
+        self.translation_spin.valueChanged.connect(self.update_translation_delta)
+
+        self.rotation_spin = QDoubleSpinBox(self)
+        self.rotation_spin.setRange(1.0, 90.0)
+        self.rotation_spin.setSingleStep(1.0)
+        self.rotation_spin.setValue(5.0)  # in degrees
+        self.rotation_spin.valueChanged.connect(self.update_rotation_delta)
+
+        # Arrange configuration spin boxes in a horizontal layout
+        config_layout = QHBoxLayout()
+        config_layout.addWidget(QLabel("Translation Step:"))
+        config_layout.addWidget(self.translation_spin)
+        config_layout.addWidget(QLabel("Rotation Step (deg):"))
+        config_layout.addWidget(self.rotation_spin)
+
+        # Set up main layout
         layout = QVBoxLayout()
         layout.addWidget(self.image_label)
+        layout.addLayout(config_layout)
         layout.addWidget(self.start_training_button)
         self.setLayout(layout)
         self.training_running = False
@@ -73,6 +98,9 @@ class GsplatManager(QWidget):
         # Initialize QTimer for auto update
         self.auto_update_timer = QTimer(self)
         self.auto_update_timer.timeout.connect(self.auto_update)
+
+        # Ensure the parent widget has focus
+        self.setFocus()
 
     def create_overlay_buttons(self):
         # Create a button for perspective mode as a child of image_label
@@ -96,6 +124,16 @@ class GsplatManager(QWidget):
         self.btn_auto_update.move(230, 10)  # Position to the right of spherical
         self.btn_auto_update.setCheckable(True)
         self.btn_auto_update.clicked.connect(self.toggle_auto_update)
+
+    def update_translation_delta(self, value):
+        # Update the translation delta from spin box value
+        self.translation_delta = value
+        logger.info(f"Translation delta updated: {value}")
+
+    def update_rotation_delta(self, value):
+        # Update the rotation delta (convert degrees to radians)
+        self.rotation_delta = np.deg2rad(value)
+        logger.info(f"Rotation delta updated: {value} degrees")
 
     def set_camera_model(self, model: str):
         # Update the selected camera model and update button styles for visual feedback
@@ -281,7 +319,7 @@ class GsplatManager(QWidget):
         transfer_time = time.time() - transfer_start
 
         # Construct the CameraState
-        camera_state = nerfview.CameraState(
+        self.camera_state = nerfview.CameraState(
             fov=90,
             aspect=1.0,
             c2w=c2w,
@@ -296,7 +334,7 @@ class GsplatManager(QWidget):
 
         # Measure rendering time
         render_start = time.time()
-        render = self.runner._viewer_render_fn(camera_state, img_wh, camera_model=self.selected_cam_model)
+        render = self.runner._viewer_render_fn(self.camera_state, img_wh, camera_model=self.selected_cam_model)
         render_time = time.time() - render_start
 
         # Measure post-processing time and scale the image to fit the label
@@ -318,6 +356,76 @@ class GsplatManager(QWidget):
             f"Timing: Transfer={transfer_time:.4f}s, Render={render_time:.4f}s, "
             f"PostProcessing={post_time:.4f}s, Total={total_time:.4f}s"
         )
+
+    def keyPressEvent(self, event):
+        """
+        Override keyPressEvent to update camera position and orientation.
+        W/A/S/D: Move forward/left/back/right.
+        Q/E: Move up/down.
+        Arrow keys: Rotate (yaw and pitch).
+        """
+        if not hasattr(self, "camera_state"):
+            return
+
+        # Convert current c2w to numpy
+        c2w = self.camera_state.c2w.cpu().numpy() if hasattr(self.camera_state.c2w, 'cpu') else self.camera_state.c2w
+
+        R = c2w[:3, :3]
+        t = c2w[:3, 3]
+
+        forward = -R[:, 2]  # Forward direction (-Z)
+        right = R[:, 0]     # Right direction (X)
+        up = R[:, 1]        # Up direction (Y)
+
+        key = event.key()
+        if key == Qt.Key_W:
+            t = t - self.translation_delta * forward
+        elif key == Qt.Key_S:
+            t = t + self.translation_delta * forward
+        elif key == Qt.Key_A:
+            t = t - self.translation_delta * right
+        elif key == Qt.Key_D:
+            t = t + self.translation_delta * right
+        elif key == Qt.Key_Q:
+            t = t + self.translation_delta * up
+        elif key == Qt.Key_E:
+            t = t - self.translation_delta * up
+        elif key == Qt.Key_Left:
+            R_delta = Rotation.from_rotvec(-self.rotation_delta * up).as_matrix()
+            R = R_delta @ R
+        elif key == Qt.Key_Right:
+            R_delta = Rotation.from_rotvec(self.rotation_delta * up).as_matrix()
+            R = R_delta @ R
+        elif key == Qt.Key_Up:
+            R_delta = Rotation.from_rotvec(self.rotation_delta * right).as_matrix()
+            R = R_delta @ R
+        elif key == Qt.Key_Down:
+            R_delta = Rotation.from_rotvec(-self.rotation_delta * right).as_matrix()
+            R = R_delta @ R
+        else:
+            return
+
+        new_c2w = np.eye(4)
+        new_c2w[:3, :3] = R
+        new_c2w[:3, 3] = t
+        self.camera_state.c2w = torch.from_numpy(new_c2w).to(self.runner.device)
+
+        # Re-render the scene with updated camera state
+        data = self.runner.allset.get_data_by_image_name(self.selected_image_name)
+        if data is None:
+            logger.error(f"Image '{self.selected_image_name}' not found for key update.")
+            return
+        img_tensor = data["image"]
+        h, w, _ = img_tensor.shape
+        img_wh = (w, h)
+        render = self.runner._viewer_render_fn(self.camera_state, img_wh, camera_model=self.selected_cam_model)
+        render_uint8 = (np.clip(render, 0, 1) * 255).astype(np.uint8)
+        height, width, channels = render_uint8.shape
+        bytes_per_line = channels * width
+        qimage = QImage(render_uint8.data, width, height, bytes_per_line, QImage.Format_RGB888)
+        pixmap = QPixmap.fromImage(qimage)
+        scaled_pixmap = pixmap.scaled(self.image_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.image_label.setPixmap(scaled_pixmap)
 
 if __name__ == "__main__":
     from PyQt5.QtWidgets import QApplication
