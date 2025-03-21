@@ -53,8 +53,8 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1
 
 # Install pip via get-pip.py and upgrade without caching
 RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python3 && \
-    pip install --no-cache-dir --upgrade pip setuptools
-RUN pip install --upgrade pip setuptools
+    pip install --no-cache-dir --upgrade pip
+RUN pip install setuptools==65.5.0
 
 # Install PyTorch packages with no cache
 RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
