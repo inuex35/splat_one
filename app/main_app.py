@@ -7,7 +7,8 @@ import importlib.util
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QToolBar, QFileDialog, QMessageBox,
     QDialog, QVBoxLayout, QPushButton, QLabel, QWidget, QTabWidget, QSplitter,
-    QTreeWidget, QTreeWidgetItem, QTableWidget, QTableWidgetItem, QComboBox
+    QTreeWidget, QTreeWidgetItem, QTableWidget, QTableWidgetItem, QComboBox, 
+    QLineEdit, QFormLayout, QCheckBox, QDialogButtonBox
 )
 from PyQt5.QtCore import Qt, QTimer
 from opensfm.dataset import DataSet
@@ -16,6 +17,16 @@ from app.feature_extractor import FeatureExtractor  # 新しく追加
 from app.feature_matching import FeatureMatching  # 新しく追加
 from app.point_cloud_visualizer import Reconstruction  # Import the PointCloudVisualizer class
 from app.gsplat_manager import GsplatManager  # 新しく追加
+from pathlib import Path
+from argparse import Namespace
+from mapillary_tools.commands.video_process import Command as VideoProcessCommand
+from PIL import Image
+import logging
+import piexif
+import fractions
+import datetime
+logging.basicConfig(level=logging.INFO)
+
 
 class ExifExtractProgressDialog(QDialog):
     def __init__(self, message="Please Wait...", parent=None):
@@ -142,7 +153,6 @@ class CameraModelEditor(QDialog):
 
         QMessageBox.information(self, "Success", "Camera models saved successfully!")
         self.accept()
-
 
 def load_camera_models(workdir):
     """camera_models.json をベースに camera_models_overrides.json を適用する"""
@@ -499,27 +509,50 @@ class MainApp(QMainWindow):
                 self.matching_tab_initialized = True
 
     def show_start_dialog(self):
-        """起動時にワークディレクトリを選択"""
-        self.workdir = QFileDialog.getExistingDirectory(self, "Select Workdir")
-        if not self.workdir:
-            QMessageBox.warning(self, "Error", "No workdir selected. Exiting.")
-            sys.exit(1)
-
-        self.load_workdir()
-
-        exif_dir = os.path.join(self.workdir, "exif")
-
-        # すべての画像に対応するEXIFが存在するか確認
-        exif_exists_for_all_images = all(
-            os.path.exists(os.path.join(exif_dir, f"{image}.exif"))
-            for image in self.image_list
+        """Prompt user at startup to select processing type."""
+        
+        choice = QMessageBox.question(
+            self,
+            "Select Input Type",
+            "Do you want to process a video file?\n"
+            "(Choose 'No' to select an image folder instead.)",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes
         )
 
-        self.camera_models = load_camera_models(self.workdir)
+        if choice == QMessageBox.Yes:
+            # Video processing with parameters dialog
+            self.process_video_with_dialog()
+        else:
+            # Image folder selection
+            self.workdir = QFileDialog.getExistingDirectory(self, "Select Work Directory (Image Folder)")
+            if not self.workdir:
+                QMessageBox.warning(self, "Error", "Work directory not selected. Exiting.")
+                sys.exit(1)
 
-        # 1つでもEXIFが欠けている場合に表示
-        if not exif_exists_for_all_images:
-            self.open_camera_model_editor()
+            images_output_dir = os.path.join(self.workdir, "images")
+            os.makedirs(images_output_dir, exist_ok=True)
+
+            for image_file in os.listdir(self.workdir):
+                if image_file.lower().endswith(('.jpg', '.jpeg', '.png')):
+                    src = os.path.join(self.workdir, image_file)
+                    dst = os.path.join(images_output_dir, image_file)
+                    if not os.path.exists(dst):
+                        shutil.copy(src, dst)
+
+            self.load_workdir()
+
+            exif_dir = os.path.join(self.workdir, "exif")
+            exif_exists_for_all_images = all(
+                os.path.exists(os.path.join(exif_dir, f"{image}.exif"))
+                for image in self.image_list
+            )
+
+            self.camera_models = load_camera_models(self.workdir)
+
+            if not exif_exists_for_all_images:
+                self.open_camera_model_editor()
+
 
     def load_workdir(self):
         if not self.workdir:
@@ -580,6 +613,82 @@ class MainApp(QMainWindow):
             self.populate_tree_with_camera_data(self.camera_image_tree)
         else:
             QMessageBox.warning(self, "Error", "No images found in the images folder.")
+
+    def convert_to_degrees(self, value):
+        d = int(value)
+        m = int((value - d) * 60)
+        s = (value - d - m / 60) * 3600
+        return d, m, s
+
+    def convert_to_rational(self, number):
+        f = fractions.Fraction(str(number)).limit_denominator()
+        return f.numerator, f.denominator
+
+    def apply_exif_from_mapillary_json(self, json_path, images_dir):
+        with open(json_path, 'r') as file:
+            metadata_list = json.load(file)
+
+        for metadata in metadata_list:
+            image_filename = metadata.get('filename')
+            if not image_filename:
+                continue
+
+            image_path = os.path.join(images_dir, os.path.basename(image_filename))
+            if not os.path.exists(image_path):
+                print(f"Image not found: {image_path}")
+                continue
+
+            try:
+                img = Image.open(image_path)
+                try:
+                    exif_dict = piexif.load(img.info['exif'])
+                except (KeyError, piexif.InvalidImageDataError):
+                    exif_dict = {"0th": {}, "Exif": {}, "GPS": {}, "1st": {}}
+
+                lat_deg = self.convert_to_degrees(metadata['MAPLatitude'])
+                lon_deg = self.convert_to_degrees(metadata['MAPLongitude'])
+
+                gps_ifd = {
+                    piexif.GPSIFD.GPSLatitudeRef: 'N' if metadata['MAPLatitude'] >= 0 else 'S',
+                    piexif.GPSIFD.GPSLongitudeRef: 'E' if metadata['MAPLongitude'] >= 0 else 'W',
+                    piexif.GPSIFD.GPSLatitude: [
+                        self.convert_to_rational(lat_deg[0]),
+                        self.convert_to_rational(lat_deg[1]),
+                        self.convert_to_rational(lat_deg[2])
+                    ],
+                    piexif.GPSIFD.GPSLongitude: [
+                        self.convert_to_rational(lon_deg[0]),
+                        self.convert_to_rational(lon_deg[1]),
+                        self.convert_to_rational(lon_deg[2])
+                    ],
+                    piexif.GPSIFD.GPSAltitude: self.convert_to_rational(metadata['MAPAltitude']),
+                    piexif.GPSIFD.GPSAltitudeRef: 0 if metadata['MAPAltitude'] >= 0 else 1,
+                }
+
+                exif_dict['GPS'] = gps_ifd
+
+                capture_time = datetime.datetime.strptime(metadata['MAPCaptureTime'], '%Y_%m_%d_%H_%M_%S_%f')
+                exif_dict['Exif'][piexif.ExifIFD.DateTimeOriginal] = capture_time.strftime('%Y:%m:%d %H:%M:%S')
+                exif_dict['0th'][piexif.ImageIFD.Orientation] = metadata.get('MAPOrientation', 1)
+
+                exif_bytes = piexif.dump(exif_dict)
+                img.save(image_path, "jpeg", exif=exif_bytes)
+                img.close()
+
+                print(f"EXIF written to {image_path}")
+
+            except Exception as e:
+                print(f"Failed to update EXIF for {image_path}: {e}")
+
+        # EXIF書き込み後、フォルダ名をimagesに変更
+        images_parent_dir = os.path.dirname(images_dir)
+        final_images_dir = os.path.join(images_parent_dir, "images")
+
+        # 既にimagesフォルダがあれば削除して置き換え
+        if os.path.exists(final_images_dir):
+            shutil.rmtree(final_images_dir)
+        os.rename(images_dir, final_images_dir)
+        print(f"Renamed folder to {final_images_dir}")
 
 
     def open_camera_model_editor(self):
@@ -705,6 +814,146 @@ class MainApp(QMainWindow):
         else:
             # Clicked on a camera group
             pass
+
+    def process_video_with_dialog(self):
+        """Process video file with Mapillary Tools with selectable parameters."""
+
+        video_file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Video File", "", "Videos (*.mp4 *.mov *.avi *.mkv)"
+        )
+        if not video_file_path:
+            QMessageBox.warning(self, "Error", "Video file not selected. Exiting.")
+            sys.exit(1)
+
+        video_file_name = os.path.splitext(os.path.basename(video_file_path))[0]
+        video_dir_name = os.path.splitext(os.path.basename(video_file_path))
+
+        video_file_dir = os.path.splitext(video_file_path)[0]
+
+        param_dialog = QDialog(self)
+        param_dialog.setWindowTitle("Video Processing Parameters")
+
+        form_layout = QFormLayout()
+
+        import_path_input = QLineEdit(video_file_dir)
+        form_layout.addRow("Import path (leave empty for default):", import_path_input)
+
+        # Sampling method selection
+        sampling_method_combo = QComboBox()
+        sampling_method_combo.addItems(["Interval", "Distance"])
+        form_layout.addRow("Sampling method:", sampling_method_combo)
+
+        # Interval input (default 0.5 sec)
+        interval_input = QLineEdit("0.5")
+        form_layout.addRow("Sample interval (seconds):", interval_input)
+        # Distance input
+        distance_input = QLineEdit("5")  # default distance 5 meters
+        distance_input.setDisabled(True)  # Default disabled
+        form_layout.addRow("Sample distance (meters):", distance_input)
+
+
+        # Connect sampling method combo to toggle inputs
+        def toggle_sampling_inputs():
+            if sampling_method_combo.currentText() == "Distance":
+                distance_input.setDisabled(False)
+                interval_input.setDisabled(True)
+            else:
+                distance_input.setDisabled(True)
+                interval_input.setDisabled(False)
+
+        sampling_method_combo.currentIndexChanged.connect(toggle_sampling_inputs)
+
+        # Geotag source (optional)
+        geotag_source_combo = QComboBox()
+        geotag_source_combo.addItem("camm")  # Default (no selection)
+        geotag_source_combo.addItems([
+            "video", "camm", "gopro", "blackvue", "gpx",
+            "nmea", "exiftool_xml", "exiftool_runtime"
+        ])
+        form_layout.addRow("Geotag source (optional):", geotag_source_combo)
+
+        # Geotag source path (optional)
+        geotag_source_path_input = QLineEdit()
+        form_layout.addRow("Geotag source path (if needed):", geotag_source_path_input)
+
+        interpolation_offset_input = QLineEdit("0")
+        form_layout.addRow("Interpolation offset time (seconds):", interpolation_offset_input)
+
+        interpolation_use_gpx_checkbox = QCheckBox()
+        interpolation_use_gpx_checkbox.setChecked(True)
+        form_layout.addRow("Use GPX start time for interpolation:", interpolation_use_gpx_checkbox)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(param_dialog.accept)
+        button_box.rejected.connect(param_dialog.reject)
+        form_layout.addRow(button_box)
+
+        param_dialog.setLayout(form_layout)
+
+        if param_dialog.exec_() == QDialog.Accepted:
+            import_path = import_path_input.text().strip() or os.path.join(video_file_dir, video_file_name)
+            os.makedirs(import_path, exist_ok=True)
+
+            images_output_dir = import_path
+            os.makedirs(images_output_dir, exist_ok=True)
+
+            # Handle sampling method
+            if sampling_method_combo.currentText() == "Distance":
+                video_sample_distance = float(distance_input.text().strip())
+                video_sample_interval = -1
+            else:
+                video_sample_interval = float(interval_input.text().strip())
+                video_sample_distance = -1
+
+            geotag_source = geotag_source_combo.currentText() or None
+            geotag_source_path = geotag_source_path_input.text().strip() or None
+
+            args = Namespace(
+                video_import_path=Path(video_file_path),
+                import_path=Path(images_output_dir),
+                video_sample_distance=video_sample_distance,
+                video_sample_interval=video_sample_interval,
+                filetypes={"image"},
+                geotag_source=geotag_source,
+                video_geotag_source=None,
+                video_geotag_source_path=geotag_source_path,
+                interpolation_offset_time=float(interpolation_offset_input.text().strip() or 0),
+                interpolation_use_gpx_start_time=interpolation_use_gpx_checkbox.isChecked(),
+                skip_process_errors=True,
+            )
+
+            try:
+                command = VideoProcessCommand()
+                command.run(vars(args))
+                json_path = os.path.join(import_path, "mapillary_image_description.json")
+                images_dir = os.path.join(images_output_dir, video_dir_name[0] + video_dir_name[1])
+
+                if os.path.exists(json_path):
+                    self.apply_exif_from_mapillary_json(json_path, images_dir)
+                else:
+                    QMessageBox.warning(self, "Warning", "mapillary_image_description.json not found.")
+            except Exception as e:
+                QMessageBox.warning(self, "Processing Error", f"Error: {str(e)}")
+                return
+
+            self.workdir = import_path
+            self.load_workdir()
+
+            exif_dir = os.path.join(self.workdir, "exif")
+            exif_exists_for_all_images = all(
+                os.path.exists(os.path.join(exif_dir, f"{image}.exif"))
+                for image in self.image_list
+            )
+
+            self.camera_models = load_camera_models(self.workdir)
+
+            if not exif_exists_for_all_images:
+                self.open_camera_model_editor()
+
+        else:
+            QMessageBox.warning(self, "Cancelled", "Video processing cancelled. Exiting.")
+            sys.exit(1)
+
 
     def display_features_for_image(self, item, column):
         """Display features for the selected image."""
