@@ -48,16 +48,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libgraphviz-dev && \
     rm -rf /var/lib/apt/lists/*
 
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1 && \
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 && \
     update-alternatives --config python3 --skip-auto
 
 # Install pip via get-pip.py and upgrade without caching
 RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python3 && \
-    pip install --no-cache-dir --upgrade pip
-RUN pip install setuptools==65.5.0 --force-reinstall
+    pip install --no-cache-dir --upgrade pip setuptools
+RUN pip install --upgrade pip setuptools
 
 # Install PyTorch packages with no cache
-RUN pip install --no-cache-dir torch==2.1.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 
 # Install additional Python dependencies (--no-cache-dir を追加)
 RUN pip install --no-cache-dir \
