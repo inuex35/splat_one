@@ -19,10 +19,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libeigen3-dev \
         libopencv-dev \
         libceres-dev \
-        python3.11 \
-        python3.11-dev \
+        python3.10 \
+        python3.10-dev \
         python3-pip \
-        python3.11-distutils \
+        python3.10-distutils \
         python-is-python3 \
         curl \
         ninja-build \
@@ -45,10 +45,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libcgal-dev \
         graphviz \
         mesa-utils \
+        ffmpeg \
         libgraphviz-dev && \
     rm -rf /var/lib/apt/lists/*
 
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 && \
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1 && \
     update-alternatives --config python3 --skip-auto
 
 # Install pip via get-pip.py and upgrade without caching
@@ -124,6 +125,7 @@ RUN pip install --no-cache-dir \
     PyOpenGL \
     PyOpenGL_accelerate \
     bokeh \
+    mapillary_tools \
     --no-cache-dir
 
 # CUDA architecture
@@ -174,7 +176,7 @@ RUN pip install --no-cache-dir --upgrade cloudpickle && \
     pip install --no-cache-dir opencv-python-headless && \
     pip install --no-cache-dir "PyOpenGL==3.1.1a1" "PyQt5"
 
-RUN apt install wget ffmpeg && mkdir -p /root/.cache/torch/hub/checkpoints && wget https://download.pytorch.org/models/alexnet-owt-7be5be79.pth -O /root/.cache/torch/hub/checkpoints/alexnet-owt-7be5be79.pth && pip3 install mapillary_tools
+RUN apt install wget && mkdir -p /root/.cache/torch/hub/checkpoints && wget https://download.pytorch.org/models/alexnet-owt-7be5be79.pth -O /root/.cache/torch/hub/checkpoints/alexnet-owt-7be5be79.pth
 
 # Set the working directory
 WORKDIR /source/splat_one
