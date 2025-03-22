@@ -19,10 +19,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libeigen3-dev \
         libopencv-dev \
         libceres-dev \
-        python3.10 \
-        python3.10-dev \
+        python3.11 \
+        python3.11-dev \
         python3-pip \
-        python3.10-distutils \
+        python3.11-distutils \
         python-is-python3 \
         curl \
         ninja-build \
