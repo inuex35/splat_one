@@ -54,10 +54,10 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1
 # Install pip via get-pip.py and upgrade without caching
 RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python3 && \
     pip install --no-cache-dir --upgrade pip setuptools
-RUN pip install --upgrade pip setuptools
+RUN pip install "setuptools<68.0.0" numpy
 
 # Install PyTorch packages with no cache
-RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+RUN pip install --no-cache-dir torch==2.5.1+cu121 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 
 # Install additional Python dependencies (--no-cache-dir を追加)
 RUN pip install --no-cache-dir \
@@ -163,7 +163,8 @@ RUN cd /source/splat_one/submodules/gsplat && \
 RUN mkdir /source/splat_one/dataset
 
 # sam2 サブモジュールのビルド
-RUN cd /source/splat_one/submodules/sam2 && \
+RUN sed -i 's/setuptools>=61.0/setuptools>=62.3.8,<75.9/' /source/splat_one/submodules/sam2/pyproject.toml && \
+    cd /source/splat_one/submodules/sam2 && \
     pip install -e ".[notebooks]" && \
     cd checkpoints && ./download_ckpts.sh
 
@@ -174,7 +175,7 @@ RUN pip install --no-cache-dir --upgrade cloudpickle && \
     pip install --no-cache-dir opencv-python-headless && \
     pip install --no-cache-dir "PyOpenGL==3.1.1a1" "PyQt5"
 
-RUN apt install wget ffmpeg && mkdir -p /root/.cache/torch/hub/checkpoints && wget https://download.pytorch.org/models/alexnet-owt-7be5be79.pth -O /root/.cache/torch/hub/checkpoints/alexnet-owt-7be5be79.pth && pip3 install mapillary_tools
+RUN apt update && apt install wget ffmpeg -y && mkdir -p /root/.cache/torch/hub/checkpoints && wget https://download.pytorch.org/models/alexnet-owt-7be5be79.pth -O /root/.cache/torch/hub/checkpoints/alexnet-owt-7be5be79.pth && pip3 install mapillary_tools
 
 # Set the working directory
 WORKDIR /source/splat_one
