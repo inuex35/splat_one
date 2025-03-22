@@ -58,7 +58,7 @@ RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python3 && \
 RUN pip install --upgrade pip setuptools
 
 # Install PyTorch packages with no cache
-RUN pip install --no-cache-dir torch==2.1.2+cu121 torchvision==0.16.2+cu121 --extra-index-url https://download.pytorch.org/whl/cu121
+RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 
 # Install additional Python dependencies (--no-cache-dir を追加)
 RUN pip install --no-cache-dir \
