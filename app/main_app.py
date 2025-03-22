@@ -6,9 +6,9 @@ import shutil
 import importlib.util
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QToolBar, QFileDialog, QMessageBox,
-    QDialog, QVBoxLayout, QPushButton, QLabel, QWidget, QTabWidget, QSplitter,
+    QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QWidget, QTabWidget, QSplitter,
     QTreeWidget, QTreeWidgetItem, QTableWidget, QTableWidgetItem, QComboBox, 
-    QLineEdit, QFormLayout, QCheckBox, QDialogButtonBox
+    QLineEdit, QFormLayout, QCheckBox, QDialogButtonBox, QSizePolicy
 )
 from PyQt5.QtCore import Qt, QTimer
 from opensfm.dataset import DataSet
@@ -27,13 +27,57 @@ import fractions
 import datetime
 logging.basicConfig(level=logging.INFO)
 
+class ResolutionDialog(QDialog):
+    def __init__(self, current_width, current_height, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Resize Images")
+        self.setFixedSize(300, 150)
+
+        self.original_width = current_width
+        self.original_height = current_height
+        self.aspect_ratio = current_width / current_height
+
+        layout = QVBoxLayout()
+
+        self.resize_method_combo = QComboBox()
+        self.resize_method_combo.addItems(["Percentage (%)", "Width (px)", "Height (px)"])
+        self.resize_method_combo.currentIndexChanged.connect(self.update_label)
+        layout.addWidget(QLabel("Resize method:"))
+        layout.addWidget(self.resize_method_combo)
+
+        form_layout = QFormLayout()
+        self.value_input = QLineEdit("100")
+        form_layout.addRow(QLabel("Value:"), self.value_input)
+
+        layout.addLayout(form_layout)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+
+        layout.addWidget(button_box)
+        self.setLayout(layout)
+
+    def update_label(self):
+        method = self.resize_method_combo.currentText()
+        if method == "Percentage (%)":
+            self.value_input.setText("100")
+        elif method == "Width (px)":
+            self.value_input.setText(str(self.original_width))
+        else:
+            self.value_input.setText(str(self.original_height))
+
+    def get_values(self):
+        method = self.resize_method_combo.currentText()
+        value = float(self.value_input.text())
+        return method, value
 
 class ExifExtractProgressDialog(QDialog):
     def __init__(self, message="Please Wait...", parent=None):
         super().__init__(parent)
         self.setWindowTitle("Extracting EXIF Data")
         self.setModal(True)
-        self.setFixedSize(320, 120)
+        self.setFixedSize(520, 120)
 
         layout = QVBoxLayout()
         label = QLabel(message)
@@ -259,48 +303,69 @@ class MainApp(QMainWindow):
         """Initialize the Images tab."""
         layout = QSplitter(Qt.Horizontal)
 
-        # Left side: Tree of images grouped by camera
+        # 左側のツリー（カメラと画像リスト）
         self.camera_image_tree = QTreeWidget()
         self.camera_image_tree.setHeaderLabel("Cameras and Images")
         self.camera_image_tree.setFixedWidth(250)
         layout.addWidget(self.camera_image_tree)
 
-        # Right side: Splitter with image viewer and EXIF display
-        right_splitter = QSplitter(Qt.Vertical)
+        # 右側のレイアウト（画像ビューア・EXIFデータ・ボタン）
+        right_widget = QWidget()
+        right_layout = QVBoxLayout()
+        right_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Image viewer
+        # 画像ビューア
         self.image_viewer = QLabel("Image Viewer")
         self.image_viewer.setAlignment(Qt.AlignCenter)
         self.image_viewer.setMinimumHeight(300)
-        right_splitter.addWidget(self.image_viewer)
+        right_layout.addWidget(self.image_viewer, stretch=3)
 
-        # EXIF data display using QTableWidget
+        # EXIFデータ表示テーブル
         self.exif_table = QTableWidget()
         self.exif_table.setColumnCount(2)
         self.exif_table.setHorizontalHeaderLabels(["Field", "Value"])
         self.exif_table.horizontalHeader().setStretchLastSection(True)
-        right_splitter.addWidget(self.exif_table)
+        right_layout.addWidget(self.exif_table, stretch=2)
 
-        layout.addWidget(right_splitter)
+        button_widget = QWidget()
+        button_layout = QHBoxLayout()
+        button_layout.setContentsMargins(5, 5, 5, 5)
+        button_layout.setSpacing(10)
 
-        # ストレッチファクターの設定
-        layout.setStretchFactor(0, 1)  # 左側を1
-        layout.setStretchFactor(1, 4)  # 右側を4
+        camera_model_button = QPushButton("Edit Camera Models")
+        camera_model_button.clicked.connect(self.open_camera_model_editor)
+
+        resize_button = QPushButton("Change Resolution")
+        resize_button.clicked.connect(self.resize_images_in_folder)
+
+        restore_button = QPushButton("Restore Images")
+        restore_button.clicked.connect(self.restore_original_images)
+
+        # 左右にストレッチを追加して、真ん中に寄せる
+        button_layout.addStretch(1)
+        button_layout.addWidget(camera_model_button)
+        button_layout.addWidget(resize_button)
+        button_layout.addWidget(restore_button)
+        button_layout.addStretch(1)
+
+        button_widget.setLayout(button_layout)
+
+        # ボタンウィジェットを横方向いっぱいに伸ばす
+        button_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        right_layout.addWidget(button_widget, stretch=0)
+
+        right_widget.setLayout(right_layout)
+        layout.addWidget(right_widget)
+
+        layout.setStretchFactor(0, 1)
+        layout.setStretchFactor(1, 4)
 
         self.images_tab.setLayout(QVBoxLayout())
         self.images_tab.layout().addWidget(layout)
 
-        # Connect signals
+        # シグナル接続
         self.camera_image_tree.itemClicked.connect(self.display_image_and_exif)
-
-        camera_model_button = QPushButton("Edit Camera Models")
-        camera_model_button.clicked.connect(self.open_camera_model_editor)
-        button_widget = QWidget()
-        button_layout = QVBoxLayout()
-        button_layout.addWidget(camera_model_button)
-        button_layout.setAlignment(Qt.AlignTop)
-        button_widget.setLayout(button_layout)
-        right_splitter.addWidget(button_widget)
 
     def init_masks_tab(self):
         """Initialize the Masks tab."""
@@ -851,8 +916,6 @@ class MainApp(QMainWindow):
         distance_input.setDisabled(True)  # Default disabled
         form_layout.addRow("Sample distance (meters):", distance_input)
 
-
-        # Connect sampling method combo to toggle inputs
         def toggle_sampling_inputs():
             if sampling_method_combo.currentText() == "Distance":
                 distance_input.setDisabled(False)
@@ -893,11 +956,9 @@ class MainApp(QMainWindow):
         if param_dialog.exec_() == QDialog.Accepted:
             import_path = import_path_input.text().strip() or os.path.join(video_file_dir, video_file_name)
             os.makedirs(import_path, exist_ok=True)
-
             images_output_dir = import_path
             os.makedirs(images_output_dir, exist_ok=True)
 
-            # Handle sampling method
             if sampling_method_combo.currentText() == "Distance":
                 video_sample_distance = float(distance_input.text().strip())
                 video_sample_interval = -1
@@ -922,9 +983,14 @@ class MainApp(QMainWindow):
                 skip_process_errors=True,
             )
 
+            progress_dialog = ExifExtractProgressDialog("Extracting frames and EXIF data from video...", self)
+            progress_dialog.show()
+            QApplication.processEvents()
+
             try:
                 command = VideoProcessCommand()
                 command.run(vars(args))
+
                 json_path = os.path.join(import_path, "mapillary_image_description.json")
                 images_dir = os.path.join(images_output_dir, video_dir_name[0] + video_dir_name[1])
 
@@ -932,9 +998,13 @@ class MainApp(QMainWindow):
                     self.apply_exif_from_mapillary_json(json_path, images_dir)
                 else:
                     QMessageBox.warning(self, "Warning", "mapillary_image_description.json not found.")
+
             except Exception as e:
                 QMessageBox.warning(self, "Processing Error", f"Error: {str(e)}")
+                progress_dialog.close()
                 return
+
+            progress_dialog.close()
 
             self.workdir = import_path
             self.load_workdir()
@@ -954,6 +1024,70 @@ class MainApp(QMainWindow):
             QMessageBox.warning(self, "Cancelled", "Video processing cancelled. Exiting.")
             sys.exit(1)
 
+    def resize_images_in_folder(self):
+        images_folder = os.path.join(self.workdir, "images")
+        images_org_folder = os.path.join(self.workdir, "images_org")
+
+        if not os.path.exists(images_org_folder):
+            shutil.copytree(images_folder, images_org_folder)
+
+        sample_image_path = next((os.path.join(images_folder, f) for f in os.listdir(images_folder)
+                                if f.lower().endswith(('.jpg', '.jpeg', '.png'))), None)
+
+        if sample_image_path:
+            with Image.open(sample_image_path) as img:
+                current_width, current_height = img.size
+        else:
+            QMessageBox.warning(self, "Error", "No images found to determine default resolution.")
+            return
+
+        dialog = ResolutionDialog(current_width, current_height, parent=self)
+        if dialog.exec_() != QDialog.Accepted:
+            return
+
+        method, value = dialog.get_values()
+
+        progress_dialog = ExifExtractProgressDialog("Resizing images...", self)
+        progress_dialog.show()
+        QApplication.processEvents()
+
+        try:
+            for image_file in os.listdir(images_folder):
+                if image_file.lower().endswith(('.jpg', '.jpeg', '.png')):
+                    image_path = os.path.join(images_folder, image_file)
+                    with Image.open(image_path) as img:
+                        if method == "Percentage (%)":
+                            scale = value / 100
+                            new_width = int(img.width * scale)
+                            new_height = int(img.height * scale)
+                        elif method == "Width (px)":
+                            new_width = int(value)
+                            new_height = int(new_width * img.height / img.width)
+                        else:  # Height (px)
+                            new_height = int(value)
+                            new_width = int(new_height * img.width / img.height)
+
+                        img_resized = img.resize((new_width, new_height), Image.LANCZOS)
+                        img_resized.save(image_path)
+
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Error during resizing: {e}")
+        finally:
+            progress_dialog.close()
+
+        QMessageBox.information(self, "Completed", "Images resized successfully!")
+
+
+    def restore_original_images(self):
+        images_folder = os.path.join(self.workdir, "images")
+        images_org_folder = os.path.join(self.workdir, "images_org")
+
+        if os.path.exists(images_org_folder):
+            shutil.rmtree(images_folder)
+            shutil.copytree(images_org_folder, images_folder)
+            QMessageBox.information(self, "Restored", "Original images restored successfully!")
+        else:
+            QMessageBox.warning(self, "Error", "No original backup images found.")
 
     def display_features_for_image(self, item, column):
         """Display features for the selected image."""

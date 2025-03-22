@@ -253,16 +253,22 @@ class ProgressMonitorThread(QThread):
             self.progress.emit(processed_count)
             if processed_count >= self.total_images:
                 break
-            time.sleep(0.5)  # 0.5秒間隔で更新
+            for _ in range(10):  # 0.5秒 = 10 * 0.05秒スリープで逐次 _is_running を確認
+                if not self._is_running:
+                    self.stopped.emit()
+                    return
+                time.sleep(0.05)
 
-        if not self._is_running:
-            self.stopped.emit()
+        self.stopped.emit()
 
     def stop(self):
         self._is_running = False
 
     def count_feature_files(self):
-        return len([f for f in os.listdir(self.feature_folder) if f.endswith('.features.npz')])
+        try:
+            return len([f for f in os.listdir(self.feature_folder) if f.endswith('.features.npz')])
+        except Exception:
+            return 0
 
 
 class FeatureExtractionThread(QThread):
@@ -341,9 +347,16 @@ class FeatureExtractor(QWidget):
     def stop_feature_extraction(self):
         if self.monitor_thread:
             self.monitor_thread.stop()
-        self.extract_button.setEnabled(False)
+            self.monitor_thread.wait()
+        if self.feature_thread and self.feature_thread.isRunning():
+            self.feature_thread.terminate()
+            self.feature_thread.wait()
+
+        self.processing = False
+        self.extract_button.setText("Extract Features")
+        self.extract_button.setEnabled(True)
         if self.progress_window:
-            self.progress_window.close() 
+            self.progress_window.close()
 
     def update_progress_window(self, processed_images):
         if self.progress_window:
