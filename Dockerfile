@@ -58,7 +58,7 @@ RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python3 && \
 RUN pip install --upgrade pip setuptools
 
 # Install PyTorch packages with no cache
-RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+RUN pip install --no-cache-dir torch==2.5.1+cu121 torchvision==2.5.1+cu121 torchaudio --index-url https://download.pytorch.org/whl/cu121
 
 # Install additional Python dependencies (--no-cache-dir を追加)
 RUN pip install --no-cache-dir \
@@ -82,8 +82,6 @@ RUN pip install --no-cache-dir \
     scipy \
     hydra-core \
     "pyparsing==3.0.9" \
-    torch \
-    "torchvision>=0.13.0" \
     "kornia==0.7.3" \
     pycolmap \
     "gtsam==4.2" \
