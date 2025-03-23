@@ -119,6 +119,9 @@ class CameraModelEditor(QDialog):
             # After saving overrides, update the camera_models.json file as well
             # This fixes the issue where camera models aren't updated
             self.update_base_camera_models(updated_models)
+            
+            # Update the EXIF data in the exifs folder with the new camera model info
+            self.update_exif_files(updated_models)
 
             QMessageBox.information(self, "Success", "Camera models saved successfully!")
             self.accept()
@@ -153,6 +156,69 @@ class CameraModelEditor(QDialog):
             return True
         except Exception as e:
             print(f"Error updating camera_models.json: {e}")
+            return False
+    
+    def update_exif_files(self, camera_models_overrides):
+        """Update EXIF files with new camera model information
+        This ensures EXIF data is consistent with camera model overrides"""
+        try:
+            exif_dir = os.path.join(self.workdir, "exif")
+            if not os.path.exists(exif_dir):
+                print(f"EXIF directory does not exist: {exif_dir}")
+                return False
+                
+            # Get the merged camera models first
+            camera_models_path = os.path.join(self.workdir, "camera_models.json")
+            if os.path.exists(camera_models_path):
+                with open(camera_models_path, "r") as f:
+                    camera_models = json.load(f)
+            else:
+                print(f"Camera models file does not exist: {camera_models_path}")
+                return False
+                
+            # Process each EXIF file
+            for filename in os.listdir(exif_dir):
+                if not filename.endswith(".exif"):
+                    continue
+                    
+                exif_path = os.path.join(exif_dir, filename)
+                
+                # Read the EXIF data
+                with open(exif_path, "r") as f:
+                    exif_data = json.load(f)
+                    
+                # Get the camera model name
+                camera_name = exif_data.get("camera", "Unknown Camera")
+                
+                # Check if there are overrides for this camera
+                if camera_name in camera_models:
+                    # Get the parameters that need to be updated
+                    camera_params = camera_models[camera_name]
+                    
+                    # Update EXIF data with the new camera parameters
+                    for param, value in camera_params.items():
+                        # Update specific fields based on the parameter
+                        if param == "projection_type":
+                            exif_data["projection_type"] = value
+                        elif param == "width":
+                            exif_data["width"] = value
+                        elif param == "height":
+                            exif_data["height"] = value
+                        elif param == "focal_ratio":
+                            exif_data["focal_ratio"] = value
+                            # If focal_x and focal_y are present, update them too
+                            if "width" in camera_params and "focal" in exif_data:
+                                exif_data["focal_x"] = value * camera_params["width"]
+                            if "height" in camera_params and "focal" in exif_data:
+                                exif_data["focal_y"] = value * camera_params["height"]
+                    
+                    # Write the updated EXIF data back to the file
+                    with open(exif_path, "w") as f:
+                        json.dump(exif_data, f, indent=4)
+                        
+            return True
+        except Exception as e:
+            print(f"Error updating EXIF files: {e}")
             return False
 
 
@@ -242,6 +308,7 @@ class CameraModelManager:
                 if dialog.exec_():
                     # Reload after saving
                     self.load_camera_models()
+                    
                 return True
             except Exception as e:
                 if parent:
@@ -251,3 +318,9 @@ class CameraModelManager:
             if parent:
                 QMessageBox.warning(parent, "Error", "Workdir is not set.")
             return False
+            
+    def update_exif_with_camera_models(self):
+        """Update all EXIF files with current camera model information
+        This can be called explicitly when needed to ensure EXIF data is in sync"""
+        editor = CameraModelEditor(self.camera_models, self.workdir)
+        return editor.update_exif_files(self.camera_models)
