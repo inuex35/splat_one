@@ -111,12 +111,15 @@ class CameraModelEditor(QDialog):
             updated_models[key][param] = value
 
         # Write JSON
-        overrides_path = os.path.join(self.workdir, "camera_models_overrides.json")
-        with open(overrides_path, "w") as f:
-            json.dump(updated_models, f, indent=4)
+        try:
+            overrides_path = os.path.join(self.workdir, "camera_models_overrides.json")
+            with open(overrides_path, "w") as f:
+                json.dump(updated_models, f, indent=4)
 
-        QMessageBox.information(self, "Success", "Camera models saved successfully!")
-        self.accept()
+            QMessageBox.information(self, "Success", "Camera models saved successfully!")
+            self.accept()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save camera models: {e}")
 
 
 class CameraModelManager:
@@ -124,6 +127,14 @@ class CameraModelManager:
     def __init__(self, workdir):
         self.workdir = workdir
         self.camera_models = {}
+        self._default_model = {
+            "Perspective": {
+                "projection_type": "perspective",
+                "width": 1920,
+                "height": 1080,
+                "focal_ratio": 1.0
+            }
+        }
         self.load_camera_models()
     
     def load_camera_models(self):
@@ -131,18 +142,39 @@ class CameraModelManager:
         camera_models_path = os.path.join(self.workdir, "camera_models.json")
         overrides_path = os.path.join(self.workdir, "camera_models_overrides.json")
 
+        # Load base models, if missing use default
         if os.path.exists(camera_models_path):
-            with open(camera_models_path, "r") as f:
-                base_models = json.load(f)
+            try:
+                with open(camera_models_path, "r") as f:
+                    base_models = json.load(f)
+            except Exception as e:
+                print(f"Error loading camera_models.json: {e}")
+                base_models = self._default_model.copy()
+                # Try to create the file with default model
+                try:
+                    with open(camera_models_path, "w") as f:
+                        json.dump(base_models, f, indent=4)
+                except Exception as e:
+                    print(f"Error creating default camera_models.json: {e}")
         else:
-            base_models = {}
+            base_models = self._default_model.copy()
+            # Try to create the file with default model
+            try:
+                with open(camera_models_path, "w") as f:
+                    json.dump(base_models, f, indent=4)
+            except Exception as e:
+                print(f"Error creating default camera_models.json: {e}")
 
+        # Load overrides if they exist
+        overrides = {}
         if os.path.exists(overrides_path):
-            with open(overrides_path, "r") as f:
-                overrides = json.load(f)
-        else:
-            overrides = {}
+            try:
+                with open(overrides_path, "r") as f:
+                    overrides = json.load(f)
+            except Exception as e:
+                print(f"Error loading camera_models_overrides.json: {e}")
 
+        # Merge models with overrides
         merged_models = base_models.copy()
         for key, params in overrides.items():
             if key in merged_models:
@@ -160,11 +192,19 @@ class CameraModelManager:
     def open_camera_model_editor(self, parent=None):
         """Open camera model editor dialog"""
         if self.workdir:
-            dialog = CameraModelEditor(self.camera_models, self.workdir, parent=parent)
-            if dialog.exec_():
-                # Reload after saving
-                self.load_camera_models()
-            return True
+            # Reload models to get latest changes
+            self.load_camera_models()
+            
+            try:
+                dialog = CameraModelEditor(self.camera_models, self.workdir, parent=parent)
+                if dialog.exec_():
+                    # Reload after saving
+                    self.load_camera_models()
+                return True
+            except Exception as e:
+                if parent:
+                    QMessageBox.critical(parent, "Error", f"Failed to open camera model editor: {e}")
+                return False
         else:
             if parent:
                 QMessageBox.warning(parent, "Error", "Workdir is not set.")
