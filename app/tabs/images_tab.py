@@ -26,6 +26,14 @@ class ImagesTab(BaseTab):
         
         # Always set up the basic UI structure
         self.setup_basic_ui()
+        
+        # Initialize managers if workdir is available
+        if self.workdir:
+            try:
+                self.camera_model_manager = CameraModelManager(self.workdir)
+                self.image_processor = ImageProcessor(self.workdir)
+            except Exception as e:
+                print(f"Error initializing managers: {e}")
     
     def get_tab_name(self):
         return "Images"
@@ -102,11 +110,24 @@ class ImagesTab(BaseTab):
         """Initialize the Images tab with data"""
         # Basic UI is already set up in __init__, so we only need to initialize data
         if self.workdir:
-            self.camera_model_manager = CameraModelManager(self.workdir)
-            self.image_processor = ImageProcessor(self.workdir)
+            # Initialize managers if not already initialized
+            if self.camera_model_manager is None:
+                try:
+                    self.camera_model_manager = CameraModelManager(self.workdir)
+                except Exception as e:
+                    QMessageBox.critical(self, "Error", f"Failed to initialize camera model manager: {e}")
+            
+            if self.image_processor is None:
+                try:
+                    self.image_processor = ImageProcessor(self.workdir)
+                except Exception as e:
+                    QMessageBox.critical(self, "Error", f"Failed to initialize image processor: {e}")
             
             # Populate the camera tree
-            self.setup_camera_image_tree(self.camera_image_tree)
+            try:
+                self.setup_camera_image_tree(self.camera_image_tree)
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to populate camera tree: {e}")
         
         self.is_initialized = True
     
@@ -152,8 +173,11 @@ class ImagesTab(BaseTab):
         camera_name = exif_data.get("camera", "Unknown Camera")
         overrides = {}
         if self.camera_model_manager:
-            camera_models = self.camera_model_manager.get_camera_models()
-            overrides = camera_models.get(camera_name, {})
+            try:
+                camera_models = self.camera_model_manager.get_camera_models()
+                overrides = camera_models.get(camera_name, {})
+            except Exception as e:
+                print(f"Error getting camera models: {e}")
         
         # Define fields to display and their order
         fields = [
@@ -190,19 +214,65 @@ class ImagesTab(BaseTab):
         """Open the camera model editor dialog"""
         if not self.is_initialized:
             self.initialize()
+        
+        # Check if camera model manager exists, if not, try to create it
+        if self.camera_model_manager is None and self.workdir:
+            try:
+                self.camera_model_manager = CameraModelManager(self.workdir)
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to initialize camera model manager: {e}")
+                return
             
         if self.camera_model_manager:
-            self.camera_model_manager.open_camera_model_editor(parent=self)
+            # Ensure camera_models.json exists
+            camera_models_path = os.path.join(self.workdir, "camera_models.json")
+            if not os.path.exists(camera_models_path):
+                # Create a default camera model if needed
+                try:
+                    with open(camera_models_path, 'w') as f:
+                        default_model = {
+                            "Perspective": {
+                                "projection_type": "perspective",
+                                "width": 1920,
+                                "height": 1080,
+                                "focal_ratio": 1.0
+                            }
+                        }
+                        json.dump(default_model, f, indent=4)
+                except Exception as e:
+                    QMessageBox.critical(self, "Error", f"Failed to create default camera model: {e}")
+                    return
+                
+                # Reload the camera model manager
+                try:
+                    self.camera_model_manager = CameraModelManager(self.workdir)
+                except Exception as e:
+                    QMessageBox.critical(self, "Error", f"Failed to reinitialize camera model manager: {e}")
+                    return
+            
+            # Now open the editor
+            try:
+                self.camera_model_manager.open_camera_model_editor(parent=self)
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to open camera model editor: {e}")
         else:
-            QMessageBox.warning(self, "Error", "Camera Model Manager is not initialized.")
+            QMessageBox.warning(self, "Error", "Camera Model Manager is not initialized and cannot be created.")
     
     def resize_images_in_folder(self):
         """Open dialog to resize images"""
         if not self.is_initialized:
             self.initialize()
             
+        # Check if image processor exists, if not, try to create it
+        if self.image_processor is None and self.workdir:
+            try:
+                self.image_processor = ImageProcessor(self.workdir)
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to initialize image processor: {e}")
+                return
+        
         if not self.image_processor:
-            QMessageBox.warning(self, "Error", "Image Processor is not initialized.")
+            QMessageBox.warning(self, "Error", "Image Processor is not initialized and cannot be created.")
             return
         
         # Get dimensions of a sample image
@@ -238,8 +308,16 @@ class ImagesTab(BaseTab):
         if not self.is_initialized:
             self.initialize()
             
+        # Check if image processor exists, if not, try to create it
+        if self.image_processor is None and self.workdir:
+            try:
+                self.image_processor = ImageProcessor(self.workdir)
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to initialize image processor: {e}")
+                return
+        
         if not self.image_processor:
-            QMessageBox.warning(self, "Error", "Image Processor is not initialized.")
+            QMessageBox.warning(self, "Error", "Image Processor is not initialized and cannot be created.")
             return
         
         result = self.image_processor.restore_original_images()
@@ -252,11 +330,20 @@ class ImagesTab(BaseTab):
         """Refresh the tab contents"""
         if self.is_initialized:
             if self.camera_model_manager:
-                self.camera_model_manager = CameraModelManager(self.workdir)
+                try:
+                    self.camera_model_manager = CameraModelManager(self.workdir)
+                except Exception as e:
+                    print(f"Error refreshing camera model manager: {e}")
             
             if self.image_processor:
-                self.image_processor = ImageProcessor(self.workdir)
+                try:
+                    self.image_processor = ImageProcessor(self.workdir)
+                except Exception as e:
+                    print(f"Error refreshing image processor: {e}")
             
             # Refresh camera image tree
             if self.camera_image_tree:
-                self.setup_camera_image_tree(self.camera_image_tree)
+                try:
+                    self.setup_camera_image_tree(self.camera_image_tree)
+                except Exception as e:
+                    print(f"Error refreshing camera image tree: {e}")
