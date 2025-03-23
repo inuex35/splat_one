@@ -34,24 +34,21 @@ RUN apt-get update && apt-get install -y \
     libxkbcommon-x11-0 \
     ffmpeg \
     wget \
+    cmake \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 # Create application directory
 WORKDIR /source/splat_one
 
-# Python dependencies - instead of requirements.txt
-RUN pip3 install --no-cache-dir \
-    numpy \
-    scipy \
-    matplotlib \
-    pillow \
-    opencv-python \
-    pyqtgraph \
-    requests \
-    tqdm \
-    torch \
-    torchvision
+# Copy requirements file
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip3 install --no-cache-dir -r requirements.txt
+
+# Install sphinx for OpenSfM documentation
+RUN pip3 install sphinx sphinx-rtd-theme
 
 # Install OpenSfM
 RUN git clone https://github.com/mapillary/OpenSfM.git /source/OpenSfM \
@@ -77,7 +74,7 @@ RUN mkdir -p configs/sam2.1
 RUN mkdir -p /root/.config/mapillary
 
 # Set Python path to include SAM2
-ENV PYTHONPATH=/source/sam2:/source/splat_one
+ENV PYTHONPATH=/source/sam2:$PYTHONPATH
 
 # Set display for GUI application
 ENV DISPLAY=:0
