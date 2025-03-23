@@ -41,11 +41,15 @@ RUN apt-get update && apt-get install -y \
 # Create application directory
 WORKDIR /source/splat_one
 
-# Copy requirements file
-COPY requirements.txt .
-
-# Install Python dependencies
-RUN pip3 install --no-cache-dir -r requirements.txt
+# Install Python dependencies directly
+RUN pip3 install --no-cache-dir \
+    numpy \
+    opencv-python \
+    torch \
+    torchvision \
+    pyqtgraph \
+    matplotlib \
+    tqdm
 
 # Install sphinx for OpenSfM documentation
 RUN pip3 install sphinx sphinx-rtd-theme
@@ -74,7 +78,7 @@ RUN mkdir -p configs/sam2.1
 RUN mkdir -p /root/.config/mapillary
 
 # Set Python path to include SAM2
-ENV PYTHONPATH=/source/sam2:$PYTHONPATH
+ENV PYTHONPATH="/source/sam2:${PYTHONPATH:-}"
 
 # Set display for GUI application
 ENV DISPLAY=:0
