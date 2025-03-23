@@ -23,16 +23,15 @@ class ImagesTab(BaseTab):
         self.camera_image_tree = None
         self.camera_model_manager = None
         self.image_processor = None
+        
+        # Always set up the basic UI structure
+        self.setup_basic_ui()
     
     def get_tab_name(self):
         return "Images"
     
-    def initialize(self):
-        """Initialize the Images tab"""
-        if self.workdir:
-            self.camera_model_manager = CameraModelManager(self.workdir)
-            self.image_processor = ImageProcessor(self.workdir)
-        
+    def setup_basic_ui(self):
+        """Set up the basic UI structure without data initialization"""
         layout = self.create_horizontal_splitter()
         
         # Left side: Camera and image tree
@@ -65,20 +64,20 @@ class ImagesTab(BaseTab):
         button_layout.setContentsMargins(5, 5, 5, 5)
         button_layout.setSpacing(10)
         
-        camera_model_button = QPushButton("Edit Camera Models")
-        camera_model_button.clicked.connect(self.open_camera_model_editor)
+        self.camera_model_button = QPushButton("Edit Camera Models")
+        self.camera_model_button.clicked.connect(self.open_camera_model_editor)
         
-        resize_button = QPushButton("Change Resolution")
-        resize_button.clicked.connect(self.resize_images_in_folder)
+        self.resize_button = QPushButton("Change Resolution")
+        self.resize_button.clicked.connect(self.resize_images_in_folder)
         
-        restore_button = QPushButton("Restore Images")
-        restore_button.clicked.connect(self.restore_original_images)
+        self.restore_button = QPushButton("Restore Images")
+        self.restore_button.clicked.connect(self.restore_original_images)
         
         # Add stretch to center the buttons
         button_layout.addStretch(1)
-        button_layout.addWidget(camera_model_button)
-        button_layout.addWidget(resize_button)
-        button_layout.addWidget(restore_button)
+        button_layout.addWidget(self.camera_model_button)
+        button_layout.addWidget(self.resize_button)
+        button_layout.addWidget(self.restore_button)
         button_layout.addStretch(1)
         
         button_widget.setLayout(button_layout)
@@ -98,14 +97,25 @@ class ImagesTab(BaseTab):
         
         # Connect signals
         self.camera_image_tree.itemClicked.connect(self.display_image_and_exif)
-        
-        # Populate the camera tree
-        self.setup_camera_image_tree(self.camera_image_tree)
+    
+    def initialize(self):
+        """Initialize the Images tab with data"""
+        # Basic UI is already set up in __init__, so we only need to initialize data
+        if self.workdir:
+            self.camera_model_manager = CameraModelManager(self.workdir)
+            self.image_processor = ImageProcessor(self.workdir)
+            
+            # Populate the camera tree
+            self.setup_camera_image_tree(self.camera_image_tree)
         
         self.is_initialized = True
     
     def display_image_and_exif(self, item, column):
         """Display the selected image and its EXIF data"""
+        if not self.is_initialized:
+            # Make sure we're initialized before attempting to display data
+            self.initialize()
+            
         if item.childCount() == 0 and item.parent() is not None:
             image_name = item.text(0)
             image_path = os.path.join(self.workdir, "images", image_name)
@@ -178,6 +188,9 @@ class ImagesTab(BaseTab):
     
     def open_camera_model_editor(self):
         """Open the camera model editor dialog"""
+        if not self.is_initialized:
+            self.initialize()
+            
         if self.camera_model_manager:
             self.camera_model_manager.open_camera_model_editor(parent=self)
         else:
@@ -185,6 +198,9 @@ class ImagesTab(BaseTab):
     
     def resize_images_in_folder(self):
         """Open dialog to resize images"""
+        if not self.is_initialized:
+            self.initialize()
+            
         if not self.image_processor:
             QMessageBox.warning(self, "Error", "Image Processor is not initialized.")
             return
@@ -219,6 +235,9 @@ class ImagesTab(BaseTab):
     
     def restore_original_images(self):
         """Restore original images from backup"""
+        if not self.is_initialized:
+            self.initialize()
+            
         if not self.image_processor:
             QMessageBox.warning(self, "Error", "Image Processor is not initialized.")
             return
@@ -231,12 +250,13 @@ class ImagesTab(BaseTab):
     
     def refresh(self):
         """Refresh the tab contents"""
-        if self.camera_model_manager:
-            self.camera_model_manager = CameraModelManager(self.workdir)
-        
-        if self.image_processor:
-            self.image_processor = ImageProcessor(self.workdir)
-        
-        # Refresh camera image tree
-        if self.camera_image_tree:
-            self.setup_camera_image_tree(self.camera_image_tree)
+        if self.is_initialized:
+            if self.camera_model_manager:
+                self.camera_model_manager = CameraModelManager(self.workdir)
+            
+            if self.image_processor:
+                self.image_processor = ImageProcessor(self.workdir)
+            
+            # Refresh camera image tree
+            if self.camera_image_tree:
+                self.setup_camera_image_tree(self.camera_image_tree)
