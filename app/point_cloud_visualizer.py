@@ -17,6 +17,10 @@ import time
 logger = setup_logger()
 
 def safe_load_reconstruction(file_path: str, retries=3, delay=1):
+    # If the file doesn't exist yet, just return None without logging errors
+    if not os.path.exists(file_path):
+        return None
+        
     for attempt in range(retries):
         try:
             with open(file_path, 'r') as f:
@@ -147,10 +151,18 @@ class Reconstruction(QWidget):
         QMessageBox.information(self, "Config", "Configuration dialog placeholder.")
 
     def check_for_updates(self):
-        mod_time = os.path.getmtime(self.reconstruction_file)
-        if mod_time != getattr(self, 'last_mod_time', None):
-            self.last_mod_time = mod_time
-            self.update_visualization()
+        # Check if the file exists before attempting to get its modification time
+        if not os.path.exists(self.reconstruction_file):
+            return
+            
+        try:
+            mod_time = os.path.getmtime(self.reconstruction_file)
+            if mod_time != getattr(self, 'last_mod_time', None):
+                self.last_mod_time = mod_time
+                self.update_visualization()
+        except (FileNotFoundError, OSError) as e:
+            # Handle any errors that might occur when checking the file
+            logger.warning(f"Error checking reconstruction file: {e}")
 
     def update_visualization(self):
         self.viewer.clear()
