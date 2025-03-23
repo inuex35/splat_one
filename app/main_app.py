@@ -156,6 +156,11 @@ class MainApp(QMainWindow):
         
         # Register tabs
         self.register_tabs()
+        
+        # Explicitly initialize the first tab
+        current_tab = self.tab_manager.get_current_tab()
+        if current_tab and hasattr(current_tab, 'on_tab_activated'):
+            current_tab.on_tab_activated()
     
     def register_tabs(self):
         """Register application tabs"""
