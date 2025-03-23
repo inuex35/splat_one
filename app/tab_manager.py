@@ -29,6 +29,13 @@ class TabManager(QTabWidget):
         # Store reference
         self.tab_instances[index] = tab_instance
         
+        # If this is the first tab, set it as active
+        if index == 0:
+            self.active_tab_index = 0
+            # Initialize the first tab immediately
+            if isinstance(tab_instance, BaseTab) and hasattr(tab_instance, 'on_tab_activated'):
+                tab_instance.on_tab_activated()
+        
         return index
     
     def get_tab_instance(self, index):
