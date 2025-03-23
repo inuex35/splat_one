@@ -162,9 +162,12 @@ class MainApp(QMainWindow):
         # Images tab
         self.tab_manager.register_tab(ImagesTab, workdir=self.workdir, image_list=self.image_list)
         
-        # Other tabs will be registered here
-        # self.tab_manager.register_tab(MasksTab, workdir=self.workdir, image_list=self.image_list)
-        # etc.
+        # Register dummy tabs to maintain the original tab structure
+        # This is a temporary solution until all tabs are properly implemented
+        for tab_name in ["Masks", "Features", "Matching", "Reconstruct", "Gsplat"]:
+            dummy_tab = QLabel(f"{tab_name} tab not implemented in this version.")
+            dummy_tab.setAlignment(Qt.AlignCenter)
+            self.tab_manager.addTab(dummy_tab, tab_name)
     
     def show_start_dialog(self):
         """Prompt user at startup to select processing type"""
@@ -261,12 +264,12 @@ class MainApp(QMainWindow):
             video_dir_name = os.path.splitext(os.path.basename(video_file_path))
             images_dir = os.path.join(import_path, video_dir_name[0] + video_dir_name[1])
             
-            if os.path.exists(json_path):
-                if not hasattr(self, "image_processor"):
-                    self.image_processor = ImageProcessor(import_path)
-                self.image_processor.apply_exif_from_mapillary_json(json_path, images_dir)
+            if os.path.exists(json_path) and os.path.exists(images_dir):
+                # Create a new ImageProcessor specifically for this operation
+                processor = ImageProcessor(import_path)
+                processor.apply_exif_from_mapillary_json(json_path, images_dir)
             else:
-                QMessageBox.warning(self, "Warning", "mapillary_image_description.json not found.")
+                QMessageBox.warning(self, "Warning", "mapillary_image_description.json or images directory not found.")
             
         except Exception as e:
             QMessageBox.warning(self, "Processing Error", f"Error: {str(e)}")
@@ -289,6 +292,7 @@ class MainApp(QMainWindow):
         # Check for images directory
         img_dir = os.path.join(self.workdir, "images")
         exif_dir = os.path.join(self.workdir, "exif")
+        os.makedirs(exif_dir, exist_ok=True)  # Ensure exif directory exists
         
         if not os.path.exists(img_dir):
             QMessageBox.warning(self, "Error", "images folder does not exist.")
@@ -302,8 +306,8 @@ class MainApp(QMainWindow):
         
         # Extract EXIF data if needed
         exif_exists_for_all_images = (
-            os.path.exists(exif_dir) and
             all(os.path.exists(os.path.join(exif_dir, f"{image}.exif")) for image in self.image_list)
+            if self.image_list else False
         )
         
         if not exif_exists_for_all_images:
@@ -318,7 +322,10 @@ class MainApp(QMainWindow):
                 # Copy config file if needed
                 config_src = "config/config.yaml"
                 config_dest = os.path.join(self.workdir, "config.yaml")
-                shutil.copy(config_src, config_dest)
+                if os.path.exists(config_src):
+                    shutil.copy(config_src, config_dest)
+                else:
+                    QMessageBox.warning(self, "Warning", f"Config file {config_src} not found.")
                 
                 # Extract metadata
                 from opensfm.actions import extract_metadata
