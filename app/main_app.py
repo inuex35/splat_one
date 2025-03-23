@@ -20,8 +20,8 @@ from app.tab_manager import TabManager
 from app.camera_models import CameraModelManager
 from app.image_processing import ImageProcessor, ExifExtractProgressDialog
 
-# Import tab classes
-from app.tabs.images_tab import ImagesTab
+# Import all tab classes
+from app.tabs import ImagesTab, MasksTab, FeaturesTab, MatchingTab, ReconstructTab, GsplatTab
 
 class VideoProcessDialog(QDialog):
     """Dialog for video processing settings"""
@@ -159,15 +159,13 @@ class MainApp(QMainWindow):
     
     def register_tabs(self):
         """Register application tabs"""
-        # Images tab
+        # Register all tabs with appropriate parameters
         self.tab_manager.register_tab(ImagesTab, workdir=self.workdir, image_list=self.image_list)
-        
-        # Register dummy tabs to maintain the original tab structure
-        # This is a temporary solution until all tabs are properly implemented
-        for tab_name in ["Masks", "Features", "Matching", "Reconstruct", "Gsplat"]:
-            dummy_tab = QLabel(f"{tab_name} tab not implemented in this version.")
-            dummy_tab.setAlignment(Qt.AlignCenter)
-            self.tab_manager.addTab(dummy_tab, tab_name)
+        self.tab_manager.register_tab(MasksTab, workdir=self.workdir, image_list=self.image_list)
+        self.tab_manager.register_tab(FeaturesTab, workdir=self.workdir, image_list=self.image_list)
+        self.tab_manager.register_tab(MatchingTab, workdir=self.workdir, image_list=self.image_list)
+        self.tab_manager.register_tab(ReconstructTab, workdir=self.workdir, image_list=self.image_list)
+        self.tab_manager.register_tab(GsplatTab, workdir=self.workdir, image_list=self.image_list)
     
     def show_start_dialog(self):
         """Prompt user at startup to select processing type"""
