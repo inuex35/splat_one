@@ -115,11 +115,45 @@ class CameraModelEditor(QDialog):
             overrides_path = os.path.join(self.workdir, "camera_models_overrides.json")
             with open(overrides_path, "w") as f:
                 json.dump(updated_models, f, indent=4)
+                
+            # After saving overrides, update the camera_models.json file as well
+            # This fixes the issue where camera models aren't updated
+            self.update_base_camera_models(updated_models)
 
             QMessageBox.information(self, "Success", "Camera models saved successfully!")
             self.accept()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to save camera models: {e}")
+            
+    def update_base_camera_models(self, overrides):
+        """Update the camera_models.json file with the latest overrides
+        This fixes the issue where camera models aren't updated when overrides is generated first time"""
+        try:
+            camera_models_path = os.path.join(self.workdir, "camera_models.json")
+            
+            # Load existing camera models if available
+            if os.path.exists(camera_models_path):
+                with open(camera_models_path, "r") as f:
+                    base_models = json.load(f)
+            else:
+                base_models = {}
+                
+            # Merge with overrides
+            merged_models = base_models.copy()
+            for key, params in overrides.items():
+                if key in merged_models:
+                    merged_models[key].update(params)
+                else:
+                    merged_models[key] = params
+                    
+            # Save updated camera models
+            with open(camera_models_path, "w") as f:
+                json.dump(merged_models, f, indent=4)
+                
+            return True
+        except Exception as e:
+            print(f"Error updating camera_models.json: {e}")
+            return False
 
 
 class CameraModelManager:
@@ -181,6 +215,14 @@ class CameraModelManager:
                 merged_models[key].update(params)
             else:
                 merged_models[key] = params
+
+        # Write the merged models back to camera_models.json to ensure it's always up-to-date
+        # This fixes the issue where camera models aren't updated when overrides changes
+        try:
+            with open(camera_models_path, "w") as f:
+                json.dump(merged_models, f, indent=4)
+        except Exception as e:
+            print(f"Error updating camera_models.json: {e}")
 
         self.camera_models = merged_models
         return merged_models
