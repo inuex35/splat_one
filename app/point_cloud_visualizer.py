@@ -11,7 +11,9 @@ from opensfm.actions import reconstruct, create_tracks
 from opensfm.reconstruction import ReconstructionAlgorithm
 from scipy.spatial.transform import Rotation
 from utils.logger import setup_logger
-
+import multiprocessing
+from multiprocessing import Process, Event
+import time
 logger = setup_logger()
 
 def safe_load_reconstruction(file_path: str, retries=3, delay=1):
@@ -61,6 +63,7 @@ class Reconstruction(QWidget):
         self.camera_size = 1.0
         self.last_mod_time = 0
         self.camera_items = []
+        self.stop_event = multiprocessing.Event()
 
         self.setFocusPolicy(Qt.StrongFocus)
         self.setFocus()
@@ -75,11 +78,11 @@ class Reconstruction(QWidget):
         button_layout = QHBoxLayout()
 
         self.run_button = QPushButton("Run Reconstruction")
-        self.run_button.clicked.connect(self.run_reconstruction_thread)
+        self.run_button.clicked.connect(self.start_reconstruction)
         button_layout.addWidget(self.run_button)
 
         self.stop_button = QPushButton("Stop Reconstruction")
-        self.stop_button.clicked.connect(self.stop_reconstruction_thread)
+        self.stop_button.clicked.connect(self.stop_reconstruction)
         self.stop_button.setEnabled(False)
         button_layout.addWidget(self.stop_button)
 
@@ -95,30 +98,39 @@ class Reconstruction(QWidget):
 
         self.update_visualization()
 
-    def run_reconstruction_thread(self):
+    def start_reconstruction(self):
         reply = QMessageBox.question(
-            self, 'Confirmation',
-            'Run the reconstruction process?',
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            self, 'Confirm', 'Start Reconstruction?',
+            QMessageBox.Yes | QMessageBox.No
         )
         if reply == QMessageBox.Yes:
             self.run_button.setEnabled(False)
             self.stop_button.setEnabled(True)
-            self.thread = ReconstructionThread(self.dataset)
-            self.thread.finished.connect(self.on_reconstruction_finished)
-            self.thread.stopped.connect(self.on_reconstruction_stopped)
-            self.thread.start()
+            self.stop_event.clear()
+            self.process = Process(target=self.run_reconstruction, args=(self.stop_event,))
+            self.process.start()
 
-    def stop_reconstruction_thread(self):
-        if hasattr(self, 'thread') and self.thread.isRunning():
+    def run_reconstruction(self, stop_event):
+        create_tracks.run_dataset(self.dataset)
+        if stop_event.is_set():
+            return
+        reconstruct.run_dataset(self.dataset, ReconstructionAlgorithm.INCREMENTAL)
+
+    def stop_reconstruction(self):
+        if self.process and self.process.is_alive():
             reply = QMessageBox.question(
-                self, 'Confirmation',
-                'Stop the reconstruction process?',
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+                self, 'Confirm', 'Stop Reconstruction?',
+                QMessageBox.Yes | QMessageBox.No
             )
             if reply == QMessageBox.Yes:
-                self.thread.stop()
-                self.thread.wait()
+                self.stop_event.set()
+                self.process.join(timeout=10)
+                if self.process.is_alive():
+                    self.process.terminate()
+                    self.process.join()
+                QMessageBox.information(self, "Stopped", "Reconstruction stopped successfully.")
+                self.run_button.setEnabled(True)
+                self.stop_button.setEnabled(False)
 
     def on_reconstruction_finished(self):
         self.run_button.setEnabled(True)
@@ -135,13 +147,10 @@ class Reconstruction(QWidget):
         QMessageBox.information(self, "Config", "Configuration dialog placeholder.")
 
     def check_for_updates(self):
-        if os.path.exists(self.reconstruction_file):
-            mod_time = os.path.getmtime(self.reconstruction_file)
-            if mod_time != self.last_mod_time:
-                self.last_mod_time = mod_time
-                data = safe_load_reconstruction(self.reconstruction_file)
-                if data:
-                    self.update_visualization()
+        mod_time = os.path.getmtime(self.reconstruction_file)
+        if mod_time != getattr(self, 'last_mod_time', None):
+            self.last_mod_time = mod_time
+            self.update_visualization()
 
     def update_visualization(self):
         self.viewer.clear()
@@ -166,6 +175,10 @@ class Reconstruction(QWidget):
                 position = -rotation.T @ translation
                 cam_type = reconstruction["cameras"][shot["camera"]]["projection_type"]
                 self.add_camera_visualization(shot_name, rotation, position, cam_type, self.camera_size)
+
+    def closeEvent(self, event):
+        self.stop_reconstruction()
+        super().closeEvent(event)
 
     def add_camera_visualization(self, cam_name, R, t, cam_model, size=1.0):
         if cam_model in ["spherical", "equirectangular"]:
