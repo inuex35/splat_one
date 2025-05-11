@@ -1,4 +1,3 @@
-# ベースは CUDA 12.1 環境
 FROM nvidia/cuda:12.1.0-cudnn8-devel-ubuntu20.04
 
 ENV LC_ALL=C.UTF-8
@@ -7,7 +6,7 @@ ARG TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6"
 ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}"
 ARG DEBIAN_FRONTEND=noninteractive
 
-# 必要なAPTパッケージをインストール
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     software-properties-common && \
     add-apt-repository ppa:deadsnakes/ppa && \
@@ -22,14 +21,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg && \
     rm -rf /var/lib/apt/lists/*
 
-# Python設定
+# Set Python 3.10 as default and install pip
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1 && \
     update-alternatives --config python3 --skip-auto && \
     curl -sS https://bootstrap.pypa.io/get-pip.py | python3 && \
     pip install --no-cache-dir --upgrade pip setuptools "setuptools<68.0.0"
 
-# PyTorchとその他依存関係
+# Install PyTorch
 RUN pip install --no-cache-dir torch==2.5.1+cu121 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+# Core Python dependencies
 RUN pip install --no-cache-dir \
     numpy pandas matplotlib scipy seaborn \
     opencv-python-headless Pillow tqdm \
@@ -44,37 +45,50 @@ RUN pip install --no-cache-dir \
     jsonschema==4.17.3 jupyter-events==0.6.3 \
     "PyOpenGL==3.1.1a1" "PyQt5" bokeh==2.4.3 \
     splines pyproj \
-    git+https://github.com/rmbrualla/pycolmap@cc7ea4b7301720ac29287dbe450952511b32125e \
+    mapillary_tools
+
+# Install additional GitHub-based packages
+RUN pip install --no-cache-dir \
+    git+https://github.com/rmbrualla/pycolmap@cc7ea4b7301720ac29287dbe450952511b32125e && \
+    pip install --no-cache-dir \
     git+https://github.com/rahul-goel/fused-ssim
 
-# splat_one 関連クローン＆ビルド
+# FlashAttention
+RUN git clone --depth 1 https://github.com/Dao-AILab/flash-attention.git /flash-attention && \
+    cd /flash-attention && pip install --no-cache-dir .
+
+# LightGlue
+RUN git clone --depth 1 https://github.com/cvg/LightGlue.git /LightGlue && \
+    cd /LightGlue && pip install --no-cache-dir .
+
+# Clone and build splat_one and submodules
 RUN git clone https://github.com/inuex35/splat_one.git /source/splat_one && \
     cd /source/splat_one && \
     git submodule update --init --recursive
 
+# Build OpenSfM
 RUN cd /source/splat_one/submodules/opensfm && \
     python3 setup.py build && \
     python3 setup.py install
 
+# Build gsplat
 RUN cd /source/splat_one/submodules/gsplat && \
     git checkout b0e978da67fb4364611c6683c5f4e6e6c1d8d8cb && \
     MAX_JOBS=4 pip install -e .
 
+# Build sam2
 RUN sed -i 's/setuptools>=61.0/setuptools>=62.3.8,<75.9/' /source/splat_one/submodules/sam2/pyproject.toml && \
     cd /source/splat_one/submodules/sam2 && \
     pip install -e ".[notebooks]" && \
     cd checkpoints && ./download_ckpts.sh
 
-# depth_any_camera のセットアップ
+# Clone and setup depth_any_camera
 RUN git clone https://github.com/yuliangguo/depth_any_camera /depth_any_camera && \
     cd /depth_any_camera && \
     pip install -r requirements.txt
 
-# PyTorchモデルの事前ダウンロード
+# Pre-download PyTorch model
 RUN mkdir -p /root/.cache/torch/hub/checkpoints && \
     wget https://download.pytorch.org/models/alexnet-owt-7be5be79.pth -O /root/.cache/torch/hub/checkpoints/alexnet-owt-7be5be79.pth
-
-# その他
-RUN pip install mapillary_tools
 
 WORKDIR /source/splat_one
