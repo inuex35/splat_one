@@ -3,6 +3,7 @@ FROM nvidia/cuda:12.1.0-cudnn8-devel-ubuntu20.04
 
 ENV LC_ALL=C.UTF-8
 ENV LANG=C.UTF-8
+ENV TORCH_CUDA_ARCH_LIST="5.2 6.0 6.1 7.0 7.5 8.0 8.6+PTX" 
 ARG DEBIAN_FRONTEND=noninteractive
 
 # 必要なAPTパッケージをインストール
