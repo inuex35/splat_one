@@ -41,6 +41,7 @@ RUN pip install --no-cache-dir \
     tensorboard tensorly xmltodict cloudpickle==0.4.0 \
     fpdf2==2.4.6 python-dateutil Sphinx==4.2.0 \
     wheel viser nerfview \
+    jsonschema==4.17.3 jupyter-events==0.6.3 \
     "PyOpenGL==3.1.1a1" "PyQt5" bokeh==2.4.3 \
     git+https://github.com/rmbrualla/pycolmap@cc7ea4b7301720ac29287dbe450952511b32125e \
     git+https://github.com/rahul-goel/fused-ssim
