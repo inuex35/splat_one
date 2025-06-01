@@ -91,4 +91,11 @@ RUN git clone https://github.com/yuliangguo/depth_any_camera /depth_any_camera &
 RUN mkdir -p /root/.cache/torch/hub/checkpoints && \
     wget https://download.pytorch.org/models/alexnet-owt-7be5be79.pth -O /root/.cache/torch/hub/checkpoints/alexnet-owt-7be5be79.pth
 
+# Set PYTHONPATH
+ENV PYTHONPATH="/depth_any_camera:$PYTHONPATH"
+
+# Install depth_any_camera custom ops
+WORKDIR /depth_any_camera/dac/models/ops
+RUN pip install -e .
+
 WORKDIR /source/splat_one
