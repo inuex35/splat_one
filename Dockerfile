@@ -85,8 +85,8 @@ RUN sed -i 's/setuptools>=61.0/setuptools>=62.3.8,<75.9/' /source/splat_one/subm
 # Clone and setup depth_any_camera
 RUN git clone https://github.com/yuliangguo/depth_any_camera /depth_any_camera
 ENV CUDA_HOME=/usr/local/cuda
-ENV PATH=CUDAHOME/bin:CUDA_HOME/bin:PATH
-ENV LD_LIBRARY_PATH=CUDAHOME/lib64:CUDA_HOME/lib64:LD_LIBRARY_PATH
+ENV PATH=${CUDA_HOME}/bin:$PATH
+ENV LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
 RUN cd /depth_any_camera && pip install -r requirements.txt
 
 # Pre-download PyTorch model
