@@ -82,6 +82,10 @@ RUN sed -i 's/setuptools>=61.0/setuptools>=62.3.8,<75.9/' /source/splat_one/subm
     pip install -e ".[notebooks]" && \
     cd checkpoints && ./download_ckpts.sh
 
+ENV CUDA_HOME=/usr/local/cuda
+ENV PATH=CUDAHOME/bin:CUDA_HOME/bin:PATH
+ENV LD_LIBRARY_PATH=CUDAHOME/lib64:CUDA_HOME/lib64:LD_LIBRARY_PATH
+
 # Clone and setup depth_any_camera
 RUN git clone https://github.com/yuliangguo/depth_any_camera /depth_any_camera && \
     cd /depth_any_camera && \
