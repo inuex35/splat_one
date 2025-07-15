@@ -47,6 +47,7 @@ RUN pip install --no-cache-dir \
     splines pyproj \
     mapillary_tools
 
+ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}"
 # Install additional GitHub-based packages
 RUN pip install --no-cache-dir \
     git+https://github.com/rmbrualla/pycolmap@cc7ea4b7301720ac29287dbe450952511b32125e && \
