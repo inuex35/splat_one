@@ -99,4 +99,4 @@ RUN mkdir -p /root/.cache/torch/hub/checkpoints && \
 
 WORKDIR /source/splat_one
 
-CMD cd /source/splat_one/dac/models/ops/ && pip install -e . && bash
+CMD cd /depth_any_camera/dac/models/ops && pip install -e . && cd /source/splat_one && bash
