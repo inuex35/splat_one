@@ -92,3 +92,5 @@ RUN mkdir -p /root/.cache/torch/hub/checkpoints && \
     wget https://download.pytorch.org/models/alexnet-owt-7be5be79.pth -O /root/.cache/torch/hub/checkpoints/alexnet-owt-7be5be79.pth
 
 WORKDIR /source/splat_one
+
+CMD cd /source/splat_one/dac/models/ops/ && pip install -e . && bash
