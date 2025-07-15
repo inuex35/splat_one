@@ -51,8 +51,14 @@ ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}"
 # Install additional GitHub-based packages
 RUN pip install --no-cache-dir \
     git+https://github.com/rmbrualla/pycolmap@cc7ea4b7301720ac29287dbe450952511b32125e && \
-    pip install --no-cache-dir \
-    git+https://github.com/rahul-goel/fused-ssim
+
+# Clone and patch fused-ssim
+RUN git clone https://github.com/rahul-goel/fused-ssim.git /tmp/fused-ssim && \
+    sed -i '/compute_100/d' /tmp/fused-ssim/setup.py && \
+    sed -i '/compute_101/d' /tmp/fused-ssim/setup.py && \
+    pip install /tmp/fused-ssim && \
+    rm -rf /tmp/fused-ssim
+
 
 # FlashAttention
 RUN git clone --depth 1 https://github.com/Dao-AILab/flash-attention.git /flash-attention && \
