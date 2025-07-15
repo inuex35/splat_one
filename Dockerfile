@@ -92,6 +92,7 @@ RUN sed -i 's/setuptools>=61.0/setuptools>=62.3.8,<75.9/' /source/splat_one/subm
 RUN git clone https://github.com/yuliangguo/depth_any_camera /depth_any_camera && \
     cd /depth_any_camera && \
     pip install -r requirements.txt
+ENV PYTHONPATH="/depth_any_camera:$PYTHONPATH"
 
 # Pre-download PyTorch model
 RUN mkdir -p /root/.cache/torch/hub/checkpoints && \
