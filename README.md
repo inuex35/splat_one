@@ -51,15 +51,7 @@ This application is designed to run via Docker. The Docker image is available as
 To launch the Docker container with GPU support and proper X11 forwarding (for GUI display), run the following command:
 
 ```bash
-docker run --gpus all \
-    -e DISPLAY=host.docker.internal:0.0 \
-    -v /tmp/.X11-unix:/tmp/.X11-unix \
-    -v ${PWD}/dataset:/source/splat_one/dataset \
-    -v C:\Users\$env:USERNAME\.cache:/home/user/.cache/ \
-    -p 7007:7007 \
-    --rm -it \
-    --shm-size=12gb \
-    inuex35/splat_one
+docker run --gpus all -e DISPLAY=host.docker.internal:0.0 -v /tmp/.X11-unix:/tmp/.X11-unix -v ${PWD}/dataset:/source/splat_one/dataset -v C:\Users\$env:USERNAME\.cache:/home/user/.cache/ -p 7007:7007 --rm -it --shm-size=12gb inuex35/splat_one
 ```
 
 Once inside the container, start the application by executing:
@@ -67,6 +59,16 @@ Once inside the container, start the application by executing:
 ```bash
 python main.py
 ```
+
+### Running with Depth Any Camera (DAC) Mode
+
+To enable the Depth Any Camera feature for advanced depth estimation, you can run the application with the `--dac` flag:
+
+```bash
+docker run --gpus all -e DISPLAY=host.docker.internal:0.0 -v /tmp/.X11-unix:/tmp/.X11-unix -v ${PWD}/dataset:/source/splat_one/dataset -v C:\Users\$env:USERNAME\.cache:/home/user/.cache/ -p 7007:7007 --rm -it --shm-size=12gb inuex35/splat_one --dac
+```
+
+The `--dac` option enables depth estimation capabilities using the Depth Any Camera model, which provides robust depth prediction for various camera types including perspective, fisheye, and 360-degree cameras.
 
 ## Dependencies
 - [OpenSfM](https://github.com/inuex35/ind-bermuda-opensfm/)
