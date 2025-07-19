@@ -47,11 +47,17 @@ RUN pip install --no-cache-dir \
     splines pyproj \
     mapillary_tools
 
+ENV TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}"
 # Install additional GitHub-based packages
 RUN pip install --no-cache-dir \
-    git+https://github.com/rmbrualla/pycolmap@cc7ea4b7301720ac29287dbe450952511b32125e && \
-    pip install --no-cache-dir \
-    git+https://github.com/rahul-goel/fused-ssim
+    git+https://github.com/rmbrualla/pycolmap@cc7ea4b7301720ac29287dbe450952511b32125e
+
+# Clone and patch fused-ssim
+RUN git clone https://github.com/rahul-goel/fused-ssim.git /tmp/fused-ssim && \
+    sed -i '/compute_100/d' /tmp/fused-ssim/setup.py && \
+    sed -i '/compute_101/d' /tmp/fused-ssim/setup.py && \
+    pip install /tmp/fused-ssim && \
+    rm -rf /tmp/fused-ssim
 
 # FlashAttention
 RUN git clone --depth 1 https://github.com/Dao-AILab/flash-attention.git /flash-attention && \
@@ -86,9 +92,15 @@ RUN sed -i 's/setuptools>=61.0/setuptools>=62.3.8,<75.9/' /source/splat_one/subm
 RUN git clone https://github.com/yuliangguo/depth_any_camera /depth_any_camera && \
     cd /depth_any_camera && \
     pip install -r requirements.txt
+ENV PYTHONPATH="/depth_any_camera:$PYTHONPATH"
 
 # Pre-download PyTorch model
 RUN mkdir -p /root/.cache/torch/hub/checkpoints && \
     wget https://download.pytorch.org/models/alexnet-owt-7be5be79.pth -O /root/.cache/torch/hub/checkpoints/alexnet-owt-7be5be79.pth
 
 WORKDIR /source/splat_one
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["bash"]
