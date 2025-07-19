@@ -21,7 +21,7 @@ from app.camera_models import CameraModelManager
 from app.image_processing import ImageProcessor, ExifExtractProgressDialog
 
 # Import all tab classes
-from app.tabs import ImagesTab, MasksTab, FeaturesTab, MatchingTab, ReconstructTab, GsplatTab
+from app.tabs import ImagesTab, MasksTab, DepthTab, FeaturesTab, MatchingTab, ReconstructTab, GsplatTab
 
 class VideoProcessDialog(QDialog):
     """Dialog for video processing settings"""
@@ -167,6 +167,7 @@ class MainApp(QMainWindow):
         # Register all tabs with appropriate parameters
         self.tab_manager.register_tab(ImagesTab, workdir=self.workdir, image_list=self.image_list)
         self.tab_manager.register_tab(MasksTab, workdir=self.workdir, image_list=self.image_list)
+        self.tab_manager.register_tab(DepthTab, workdir=self.workdir, image_list=self.image_list)
         self.tab_manager.register_tab(FeaturesTab, workdir=self.workdir, image_list=self.image_list)
         self.tab_manager.register_tab(MatchingTab, workdir=self.workdir, image_list=self.image_list)
         self.tab_manager.register_tab(ReconstructTab, workdir=self.workdir, image_list=self.image_list)
