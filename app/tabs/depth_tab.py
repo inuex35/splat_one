@@ -235,15 +235,16 @@ class DepthTab(BaseTab):
         self.progress_bar = None
         self.status_label = None
         self.depth_thread = None
-        
-        # Always set up the basic UI structure
-        self.setup_basic_ui()
     
     def get_tab_name(self):
         return "Depth"
     
-    def setup_basic_ui(self):
-        """Set up the basic UI structure without data initialization"""
+    def initialize(self):
+        """Initialize the tab when first accessed"""
+        if not self.workdir:
+            QMessageBox.warning(self, "Error", "Work directory is not set.")
+            return
+            
         main_layout = QVBoxLayout()
         
         # Control panel
@@ -295,6 +296,12 @@ class DepthTab(BaseTab):
         
         main_layout.addWidget(splitter)
         self._layout.addLayout(main_layout)
+        
+        # Populate the camera image tree
+        if self.workdir and self.image_list:
+            self.setup_camera_image_tree(self.camera_image_tree, self.on_image_selected)
+            
+        self.is_initialized = True
     
     def create_control_panel(self):
         """Create the control panel with model selection"""
@@ -317,11 +324,6 @@ class DepthTab(BaseTab):
         
         group_box.setLayout(layout)
         return group_box
-    
-    def initialize(self):
-        """Initialize the tab when first accessed"""
-        if self.workdir and self.image_list:
-            self.setup_camera_image_tree(self.camera_image_tree, self.on_image_selected)
     
     def on_image_selected(self, item, column):
         """Handle image selection from tree"""
@@ -402,5 +404,12 @@ class DepthTab(BaseTab):
     
     def refresh(self):
         """Refresh the tab contents"""
-        if self.workdir and self.image_list:
-            self.setup_camera_image_tree(self.camera_image_tree, self.on_image_selected)
+        # Reinitialize the tab if initialized
+        if self.is_initialized:
+            # Remove old widgets
+            for i in reversed(range(self._layout.count())): 
+                self._layout.itemAt(i).widget().setParent(None)
+            
+            # Reinitialize
+            self.is_initialized = False
+            self.initialize()
