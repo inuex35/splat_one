@@ -100,4 +100,7 @@ RUN mkdir -p /root/.cache/torch/hub/checkpoints && \
 
 WORKDIR /source/splat_one
 
-CMD cd /depth_any_camera/dac/models/ops && pip install -e . && cd /source/splat_one && bash
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["bash"]
