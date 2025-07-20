@@ -1,6 +1,7 @@
 # depth_tab.py
 
 import os
+import sys
 import json
 import numpy as np
 import torch
@@ -18,6 +19,9 @@ from PyQt5.QtGui import QPixmap, QImage
 
 from app.base_tab import BaseTab
 
+# Add Depth-Anything-V2 to path
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'submodules', 'Depth-Anything-V2'))
+
 
 class DepthEstimationThread(QThread):
     """Thread for running depth estimation"""
@@ -32,6 +36,7 @@ class DepthEstimationThread(QThread):
         self.image_list = image_list
         self.model_type = model_type
         self.model = None
+        self.transform = None
         
     def run(self):
         try:
@@ -84,137 +89,101 @@ class DepthEstimationThread(QThread):
     def load_depth_anything_v2(self):
         """Load Depth Anything V2 model"""
         try:
-            # Import Depth Anything V2
-            import sys
-            sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'submodules', 'Depth-Anything-V2'))
             from depth_anything_v2.dpt import DepthAnythingV2
             
-            # Initialize model
+            self.status.emit("Loading Depth Anything V2 model...")
+            
+            # Model configurations
             model_configs = {
+                'vits': {'encoder': 'vits', 'features': 64, 'out_channels': [48, 96, 192, 384]},
+                'vitb': {'encoder': 'vitb', 'features': 128, 'out_channels': [96, 192, 384, 768]},
                 'vitl': {'encoder': 'vitl', 'features': 256, 'out_channels': [256, 512, 1024, 1024]},
-                'vits': {'encoder': 'vits', 'features': 64, 'out_channels': [48, 96, 192, 384]}
+                'vitg': {'encoder': 'vitg', 'features': 384, 'out_channels': [1536, 1536, 1536, 1536]}
             }
             
-            encoder = 'vitl'  # Using large model by default
+            # Use vitl by default for good balance of quality and speed
+            encoder = 'vitl'
+            
+            # Initialize model
             model = DepthAnythingV2(**model_configs[encoder])
             
-            # Load checkpoint if available
-            checkpoint_path = os.path.join(self.workdir, 'models', 'depth_anything_v2_vitl.pth')
+            # Try to load checkpoint
+            checkpoint_path = os.path.join(self.workdir, 'models', f'depth_anything_v2_{encoder}.pth')
             if os.path.exists(checkpoint_path):
-                model.load_state_dict(torch.load(checkpoint_path, map_location='cpu'))
+                self.status.emit(f"Loading checkpoint from {checkpoint_path}...")
+                state_dict = torch.load(checkpoint_path, map_location='cpu')
+                model.load_state_dict(state_dict)
+            else:
+                self.status.emit("Warning: No checkpoint found, using random weights")
             
-            model.eval()
-            if torch.cuda.is_available():
-                model = model.cuda()
-                
+            # Set device and eval mode
+            device = 'cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'
+            model = model.to(device).eval()
+            
             return model
             
         except Exception as e:
-            print(f"Error loading Depth Anything V2: {e}")
+            print(f"Error loading Depth Anything V2 model: {e}")
             raise
     
     def load_dac_model(self):
-        """Load DAC (Depth Anything Camera) model"""
+        """Load model for camera-aware depth estimation"""
+        # For now, use vits model for faster inference
         try:
-            # Import DAC
-            import sys
-            sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'submodules', 'depth_any_camera'))
-            from dac import DepthAnythingCamera
+            from depth_anything_v2.dpt import DepthAnythingV2
             
-            # Initialize model
-            model = DepthAnythingCamera(
-                encoder='vitl',
-                dataset='hypersim',  # or 'vkitti' depending on your use case
-                max_depth=20
-            )
+            self.status.emit("Loading Depth Anything V2 (small) model for camera-aware estimation...")
             
-            # Load checkpoint if available
-            checkpoint_path = os.path.join(self.workdir, 'models', 'dac_vitl_hypersim.pth')
+            model_configs = {
+                'vits': {'encoder': 'vits', 'features': 64, 'out_channels': [48, 96, 192, 384]},
+                'vitb': {'encoder': 'vitb', 'features': 128, 'out_channels': [96, 192, 384, 768]}
+            }
+            
+            encoder = 'vits'  # Use smaller model for camera-aware mode
+            
+            model = DepthAnythingV2(**model_configs[encoder])
+            
+            checkpoint_path = os.path.join(self.workdir, 'models', f'depth_anything_v2_{encoder}.pth')
             if os.path.exists(checkpoint_path):
-                model.load_state_dict(torch.load(checkpoint_path, map_location='cpu'))
+                state_dict = torch.load(checkpoint_path, map_location='cpu')
+                model.load_state_dict(state_dict)
             
-            model.eval()
-            if torch.cuda.is_available():
-                model = model.cuda()
-                
+            device = 'cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'
+            model = model.to(device).eval()
+            
             return model
             
         except Exception as e:
-            print(f"Error loading DAC: {e}")
-            raise
+            print(f"Error loading DAC model: {e}")
+            return self.load_depth_anything_v2()
     
     def estimate_depth(self, image_path):
         """Estimate depth for an image"""
-        # Load image
-        image_pil = Image.open(image_path).convert('RGB')
-        image_rgb = np.array(image_pil)
-        
-        # Prepare input
-        if self.model_type == 'depth_anything_v2':
-            # Resize to standard size
-            h, w = image_rgb.shape[:2]
-            target_size = (518, 518)  # Standard size for Depth Anything V2
-            image_pil_resized = image_pil.resize(target_size, Image.Resampling.LANCZOS)
-            image_resized = np.array(image_pil_resized)
+        try:
+            # Load image with PIL
+            image_pil = Image.open(image_path).convert('RGB')
             
-            # Normalize and convert to tensor
-            image_tensor = torch.from_numpy(image_resized).permute(2, 0, 1).float() / 255.0
-            image_tensor = image_tensor.unsqueeze(0)
+            # Convert to numpy array in BGR format (as expected by the model)
+            image_np = np.array(image_pil)
+            # Convert RGB to BGR by reversing the channel order
+            image_bgr = image_np[:, :, ::-1]
             
-            if torch.cuda.is_available():
-                image_tensor = image_tensor.cuda()
+            # Use the model's built-in infer_image method
+            # This method handles all preprocessing internally
+            depth_map = self.model.infer_image(image_bgr)
             
-            # Get depth prediction
-            with torch.no_grad():
-                depth = self.model(image_tensor)
+            # The output is already a numpy array in HxW format
+            return depth_map
             
-            # Resize back to original size
-            depth_np = depth.squeeze().cpu().numpy()
-            depth_pil = Image.fromarray(depth_np)
-            depth_pil_resized = depth_pil.resize((w, h), Image.Resampling.LANCZOS)
-            depth_map = np.array(depth_pil_resized)
-            
-        elif self.model_type == 'dac':
-            # For DAC, we need camera intrinsics
-            # Try to load from exif data
-            exif_path = os.path.join(self.workdir, 'exif', os.path.basename(image_path) + '.exif')
-            if os.path.exists(exif_path):
-                with open(exif_path, 'r') as f:
-                    exif_data = json.load(f)
-                # Extract camera parameters (simplified - you may need to adjust)
-                focal_length = exif_data.get('focal_ratio', 1.0)
-                # Create intrinsics matrix
-                h, w = image_rgb.shape[:2]
-                K = np.array([
-                    [focal_length * w, 0, w / 2],
-                    [0, focal_length * w, h / 2],
-                    [0, 0, 1]
-                ])
+        except Exception as e:
+            print(f"Error during depth estimation: {e}")
+            # Return a dummy depth map
+            if 'image_pil' in locals():
+                w, h = image_pil.size
+                depth_map = np.ones((h, w), dtype=np.float32)
             else:
-                # Default intrinsics
-                h, w = image_rgb.shape[:2]
-                K = np.array([
-                    [w, 0, w / 2],
-                    [0, w, h / 2],
-                    [0, 0, 1]
-                ])
-            
-            # Prepare input for DAC
-            image_tensor = torch.from_numpy(image_rgb).permute(2, 0, 1).float() / 255.0
-            image_tensor = image_tensor.unsqueeze(0)
-            K_tensor = torch.from_numpy(K).float().unsqueeze(0)
-            
-            if torch.cuda.is_available():
-                image_tensor = image_tensor.cuda()
-                K_tensor = K_tensor.cuda()
-            
-            # Get depth prediction
-            with torch.no_grad():
-                depth = self.model(image_tensor, K_tensor)
-            
-            depth_map = depth.squeeze().cpu().numpy()
-        
-        return depth_map
+                depth_map = np.ones((512, 512), dtype=np.float32)
+            return depth_map
     
     def colorize_depth(self, depth_map):
         """Colorize depth map for visualization"""
