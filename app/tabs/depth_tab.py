@@ -2,9 +2,11 @@
 
 import os
 import json
-import cv2
 import numpy as np
 import torch
+from PIL import Image
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QLabel, QPushButton, QTreeWidget, QTableWidget, QTableWidgetItem, 
@@ -66,7 +68,7 @@ class DepthEstimationThread(QThread):
                 # Save colorized depth map
                 colorized_depth = self.colorize_depth(depth_map)
                 colorized_path = os.path.join(depth_dir, f"{image_name}_depth.png")
-                cv2.imwrite(colorized_path, colorized_depth)
+                colorized_depth.save(colorized_path)
                 
                 # Update progress
                 progress = int((i + 1) / total_images * 100)
@@ -144,15 +146,16 @@ class DepthEstimationThread(QThread):
     def estimate_depth(self, image_path):
         """Estimate depth for an image"""
         # Load image
-        image = cv2.imread(image_path)
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        image_pil = Image.open(image_path).convert('RGB')
+        image_rgb = np.array(image_pil)
         
         # Prepare input
         if self.model_type == 'depth_anything_v2':
             # Resize to standard size
             h, w = image_rgb.shape[:2]
             target_size = (518, 518)  # Standard size for Depth Anything V2
-            image_resized = cv2.resize(image_rgb, target_size)
+            image_pil_resized = image_pil.resize(target_size, Image.Resampling.LANCZOS)
+            image_resized = np.array(image_pil_resized)
             
             # Normalize and convert to tensor
             image_tensor = torch.from_numpy(image_resized).permute(2, 0, 1).float() / 255.0
@@ -167,7 +170,9 @@ class DepthEstimationThread(QThread):
             
             # Resize back to original size
             depth_np = depth.squeeze().cpu().numpy()
-            depth_map = cv2.resize(depth_np, (w, h))
+            depth_pil = Image.fromarray(depth_np)
+            depth_pil_resized = depth_pil.resize((w, h), Image.Resampling.LANCZOS)
+            depth_map = np.array(depth_pil_resized)
             
         elif self.model_type == 'dac':
             # For DAC, we need camera intrinsics
@@ -213,14 +218,20 @@ class DepthEstimationThread(QThread):
     
     def colorize_depth(self, depth_map):
         """Colorize depth map for visualization"""
-        # Normalize depth to 0-255
-        depth_normalized = (depth_map - depth_map.min()) / (depth_map.max() - depth_map.min())
-        depth_uint8 = (depth_normalized * 255).astype(np.uint8)
+        # Normalize depth to 0-1
+        depth_normalized = (depth_map - depth_map.min()) / (depth_map.max() - depth_map.min() + 1e-8)
         
-        # Apply colormap
-        colorized = cv2.applyColorMap(depth_uint8, cv2.COLORMAP_TURBO)
+        # Apply matplotlib's turbo colormap
+        colormap = cm.get_cmap('turbo')
+        colored = colormap(depth_normalized)
         
-        return colorized
+        # Convert to RGB (remove alpha channel) and scale to 0-255
+        colored_rgb = (colored[:, :, :3] * 255).astype(np.uint8)
+        
+        # Convert to PIL Image
+        colorized_image = Image.fromarray(colored_rgb)
+        
+        return colorized_image
 
 
 class DepthTab(BaseTab):
