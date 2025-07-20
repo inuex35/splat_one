@@ -187,8 +187,9 @@ class DepthEstimationThread(QThread):
     
     def colorize_depth(self, depth_map):
         """Colorize depth map for visualization"""
-        # Normalize depth to 0-1
-        depth_normalized = (depth_map - depth_map.min()) / (depth_map.max() - depth_map.min() + 1e-8)
+        # Normalize depth to 0-20m range
+        depth_clipped = np.clip(depth_map, 0, 20)
+        depth_normalized = depth_clipped / 20.0
         
         # Apply matplotlib's turbo colormap
         colormap = cm.get_cmap('turbo')
