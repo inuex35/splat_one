@@ -14,3 +14,9 @@
 	path = submodules/gsplat
 	url = https://github.com/inuex35/gsplat.git
 	branch = spherical_render
+[submodule "submodules/Depth-Anything-V2"]
+	path = submodules/Depth-Anything-V2
+	url = https://github.com/DepthAnything/Depth-Anything-V2.git
+[submodule "submodules/depth_any_camera"]
+	path = submodules/depth_any_camera
+	url = https://github.com/DepthAnything/Depth-Any-Camera.git
