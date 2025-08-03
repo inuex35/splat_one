@@ -835,7 +835,7 @@ class DepthTab(BaseTab):
             # DAC only supports small model
             self.size_selector.setCurrentIndex(0)  # Small
             self.size_selector.setEnabled(False)
-    
+
     def on_tab_changed(self, index):
         """Handle tab change"""
         if index == 1 and self.point_cloud_viewer is None:  # Point cloud tab selected
