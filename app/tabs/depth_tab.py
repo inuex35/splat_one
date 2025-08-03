@@ -13,12 +13,13 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QLabel, QPushButton, QTreeWidget, QTableWidget, QTableWidgetItem, 
     QSizePolicy, QMessageBox, QApplication, QDialog, QComboBox,
-    QProgressBar, QGroupBox, QRadioButton, QButtonGroup
+    QProgressBar, QGroupBox, QRadioButton, QButtonGroup, QTabWidget
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QPixmap, QImage
 
 from app.base_tab import BaseTab
+from app.point_cloud_viewer import PointCloudViewer
 
 # Add Depth-Anything-V2 to path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'submodules', 'Depth-Anything-V2'))
@@ -426,6 +427,8 @@ class DepthTab(BaseTab):
         self.camera_image_tree = None
         self.image_viewer = None
         self.depth_viewer = None
+        self.point_cloud_viewer = None
+        self.view_tab_widget = None
         self.model_selector = None
         self.estimate_button = None
         self.download_button = None
@@ -476,11 +479,10 @@ class DepthTab(BaseTab):
         self.camera_image_tree.setFixedWidth(250)
         layout.addWidget(self.camera_image_tree)
         
-        # Right side: Depth viewer container with control panel at bottom
-        right_container = QWidget()
-        right_layout = QVBoxLayout(right_container)
+        # Right side: Tab widget for different views
+        self.view_tab_widget = QTabWidget()
         
-        # Depth viewer area
+        # Image and Depth tab
         self.depth_viewer_container = QWidget()
         self.depth_viewer_layout = QVBoxLayout(self.depth_viewer_container)
         
@@ -490,10 +492,25 @@ class DepthTab(BaseTab):
         placeholder.setStyleSheet("border: 1px solid #ccc; color: #666;")
         self.depth_viewer_layout.addWidget(placeholder)
         
-        right_layout.addWidget(self.depth_viewer_container)
+        self.view_tab_widget.addTab(self.depth_viewer_container, "Image & Depth")
+        
+        # Point Cloud tab - lazy initialization
+        self.point_cloud_viewer = None
+        self.point_cloud_placeholder = QLabel("Initializing point cloud viewer...")
+        self.point_cloud_placeholder.setAlignment(Qt.AlignCenter)
+        self.point_cloud_placeholder.setStyleSheet("border: 1px solid #ccc; color: #666;")
+        self.view_tab_widget.addTab(self.point_cloud_placeholder, "Point Cloud")
+        
+        # Initialize on tab change
+        self.view_tab_widget.currentChanged.connect(self.on_tab_changed)
         
         # Control panel at bottom right
         control_panel = self.create_control_panel()
+        
+        # Right container
+        right_container = QWidget()
+        right_layout = QVBoxLayout(right_container)
+        right_layout.addWidget(self.view_tab_widget)
         right_layout.addWidget(control_panel)
         
         layout.addWidget(right_container)
@@ -730,6 +747,10 @@ class DepthTab(BaseTab):
             self.depth_viewer.setPixmap(scaled_depth)
         else:
             self.depth_viewer.setText("No depth map available")
+        
+        # Update point cloud if available and initialized
+        if self.point_cloud_viewer:
+            self.point_cloud_viewer.load_point_cloud_from_images(image_name)
     
     def toggle_depth_estimation(self):
         """Toggle depth estimation (start/stop)"""
@@ -828,6 +849,32 @@ class DepthTab(BaseTab):
         current_item = self.camera_image_tree.currentItem()
         if current_item and current_item.parent():
             self.display_image_and_depth(current_item.text(0))
+            
+        # Update point cloud viewer workdir
+        if self.point_cloud_viewer:
+            self.point_cloud_viewer.set_workdir(self.workdir)
+    
+    def on_tab_changed(self, index):
+        """Handle tab change"""
+        if index == 1 and self.point_cloud_viewer is None:  # Point cloud tab selected
+            try:
+                # Initialize point cloud viewer
+                self.point_cloud_viewer = PointCloudViewer(self.workdir)
+                
+                # Remove placeholder and replace with point cloud viewer
+                self.view_tab_widget.removeTab(1)
+                self.view_tab_widget.insertTab(1, self.point_cloud_viewer, "Point Cloud")
+                self.view_tab_widget.setCurrentIndex(1)
+                
+                # Display point cloud if image is selected
+                current_item = self.camera_image_tree.currentItem()
+                if current_item and current_item.parent():
+                    self.point_cloud_viewer.load_point_cloud_from_images(current_item.text(0))
+                    
+            except Exception as e:
+                print(f"Point cloud viewer initialization error: {e}")
+                # Keep placeholder on error
+                pass
     
     def refresh(self):
         """Refresh the tab content"""
@@ -840,3 +887,7 @@ class DepthTab(BaseTab):
             self.setup_basic_ui()
             self.is_initialized = False
             self.initialize()
+            
+            # Update point cloud viewer workdir
+            if self.point_cloud_viewer:
+                self.point_cloud_viewer.set_workdir(self.workdir)

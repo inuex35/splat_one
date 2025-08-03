@@ -47,7 +47,7 @@ from gsplat.optimizers import SelectiveAdam
 logger = setup_logger()
 
 def load_reconstruction(file_path: str):
-    """JSONファイルから再構築データをロードする関数"""
+    """Function to load reconstruction data from JSON file"""
     try:
         with open(file_path, 'r') as f:
             data = json.load(f)
@@ -431,7 +431,7 @@ class Runner:
             ).to(self.device)
         else:
             raise ValueError(f"Unknown LPIPS network: {cfg.lpips_net}")
-        self.stop_training = False  # 追加: 学習停止用フラグ
+        self.stop_training = False  # Added: training stop flag
 
         """
         if not self.cfg.disable_viewer:

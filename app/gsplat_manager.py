@@ -160,16 +160,16 @@ class GsplatManager(QWidget):
             logger.info("Auto update disabled.")
             
     def auto_update(self):
-        # 現在のカメラ位置を使って更新する
+        # Update using current camera position
         if hasattr(self, "camera_state"):
             self.render_current_camera()
 
     def render_current_camera(self):
-        # 現在のカメラ位置でレンダリングし直す関数
+        # Function to re-render at current camera position
         if not hasattr(self, "camera_state"):
             return
 
-        # 現在の選択画像からサイズ情報を取得
+        # Get size information from currently selected image
         data = self.runner.allset.get_data_by_image_name(self.selected_image_name)
         if data is None:
             logger.error(f"Image '{self.selected_image_name}' not found.")
@@ -181,7 +181,7 @@ class GsplatManager(QWidget):
         if self.selected_cam_model == "pinhole":
             h = w
 
-        # レンダリング実行
+        # Execute rendering
         render = self.runner._viewer_render_fn(self.camera_state, img_wh, camera_model=self.selected_cam_model)
         render_uint8 = (np.clip(render, 0, 1) * 255).astype(np.uint8)
         height, width, channels = render_uint8.shape
@@ -189,7 +189,7 @@ class GsplatManager(QWidget):
         qimage = QImage(render_uint8.data, width, height, bytes_per_line, QImage.Format_RGB888)
         pixmap = QPixmap.fromImage(qimage)
 
-        # QLabelにフィットするようにスケーリング
+        # Scale to fit QLabel
         scaled_pixmap = pixmap.scaled(self.image_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self.image_label.setPixmap(scaled_pixmap)
 
@@ -216,7 +216,7 @@ class GsplatManager(QWidget):
         """Load reconstruction data from JSON and extract point cloud and camera information."""
         data = load_reconstruction(self.reconstruction_json_path)
         if data is None:
-            logger.error("再構築データが読み込めませんでした。")
+            logger.error("Failed to load reconstruction data.")
             return
 
         # Use only the first reconstruction as an example
