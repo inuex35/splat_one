@@ -5,6 +5,7 @@ import sys
 import json
 import numpy as np
 import torch
+import requests
 from PIL import Image
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
@@ -23,6 +24,82 @@ from app.base_tab import BaseTab
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'submodules', 'Depth-Anything-V2'))
 
 
+class WeightDownloadThread(QThread):
+    """Thread for downloading model weights"""
+    progress = pyqtSignal(int)
+    status = pyqtSignal(str)
+    error = pyqtSignal(str)
+    finished = pyqtSignal()
+    
+    def __init__(self, workdir, model_type='vitl'):
+        super().__init__()
+        self.workdir = workdir
+        self.model_type = model_type
+        self._stop_flag = False
+        
+        # Model download URLs
+        self.download_urls = {
+            'vits': 'https://huggingface.co/depth-anything/Depth-Anything-V2-Small/resolve/main/depth_anything_v2_vits.pth?download=true',
+            'vitb': 'https://huggingface.co/depth-anything/Depth-Anything-V2-Base/resolve/main/depth_anything_v2_vitb.pth?download=true',
+            'vitl': 'https://huggingface.co/depth-anything/Depth-Anything-V2-Large/resolve/main/depth_anything_v2_vitl.pth?download=true'
+        }
+        
+    def run(self):
+        try:
+            # Create models directory
+            models_dir = os.path.join(self.workdir, 'models')
+            os.makedirs(models_dir, exist_ok=True)
+            
+            # Get download URL
+            if self.model_type not in self.download_urls:
+                raise ValueError(f"Unsupported model type: {self.model_type}")
+            
+            url = self.download_urls[self.model_type]
+            filename = f'depth_anything_v2_{self.model_type}.pth'
+            filepath = os.path.join(models_dir, filename)
+            
+            # Check if file already exists
+            if os.path.exists(filepath):
+                self.status.emit(f"Weight file {filename} already exists!")
+                self.finished.emit()
+                return
+            
+            self.status.emit(f"Downloading {filename}...")
+            
+            # Download with progress tracking
+            response = requests.get(url, stream=True)
+            response.raise_for_status()
+            
+            total_size = int(response.headers.get('content-length', 0))
+            downloaded_size = 0
+            
+            with open(filepath, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        # Check stop flag
+                        if self._stop_flag:
+                            self.status.emit("Download stopped")
+                            return
+                        
+                        f.write(chunk)
+                        downloaded_size += len(chunk)
+                        if total_size > 0:
+                            progress = int((downloaded_size / total_size) * 100)
+                            self.progress.emit(progress)
+            
+            if not self._stop_flag:
+                self.status.emit(f"Download completed: {filename}")
+            
+        except Exception as e:
+            self.error.emit(str(e))
+        finally:
+            self.finished.emit()
+    
+    def stop(self):
+        """Stop the download"""
+        self._stop_flag = True
+
+
 class DepthEstimationThread(QThread):
     """Thread for running depth estimation"""
     progress = pyqtSignal(int)
@@ -37,6 +114,7 @@ class DepthEstimationThread(QThread):
         self.model_type = model_type
         self.model = None
         self.transform = None
+        self._stop_flag = False
         
     def run(self):
         try:
@@ -49,6 +127,11 @@ class DepthEstimationThread(QThread):
             else:
                 raise ValueError(f"Unknown model type: {self.model_type}")
             
+            # Check if stopped during model loading
+            if self._stop_flag:
+                self.status.emit("Depth estimation stopped")
+                return
+            
             # Create depth output directory
             depth_dir = os.path.join(self.workdir, "depth")
             os.makedirs(depth_dir, exist_ok=True)
@@ -56,6 +139,11 @@ class DepthEstimationThread(QThread):
             # Process images
             total_images = len(self.image_list)
             for i, image_name in enumerate(self.image_list):
+                # Check stop flag
+                if self._stop_flag:
+                    self.status.emit("Depth estimation stopped")
+                    return
+                
                 self.status.emit(f"Processing {image_name}...")
                 
                 # Load image
@@ -63,10 +151,15 @@ class DepthEstimationThread(QThread):
                 if not os.path.exists(image_path):
                     continue
                     
-                # Estimate depth
+                # Estimate depth (already includes post-processing)
                 depth_map = self.estimate_depth(image_path)
                 
-                # Save depth map
+                # Check stop flag again after estimation
+                if self._stop_flag:
+                    self.status.emit("Depth estimation stopped")
+                    return
+                
+                # Save processed depth map
                 depth_path = os.path.join(depth_dir, f"{image_name}_depth.npy")
                 np.save(depth_path, depth_map)
                 
@@ -79,12 +172,17 @@ class DepthEstimationThread(QThread):
                 progress = int((i + 1) / total_images * 100)
                 self.progress.emit(progress)
             
-            self.status.emit("Depth estimation completed!")
+            if not self._stop_flag:
+                self.status.emit("Depth estimation completed!")
             
         except Exception as e:
             self.error.emit(str(e))
         finally:
             self.finished.emit()
+    
+    def stop(self):
+        """Stop the depth estimation"""
+        self._stop_flag = True
     
     def load_depth_anything_v2(self):
         """Load Depth Anything V2 model"""
@@ -114,7 +212,15 @@ class DepthEstimationThread(QThread):
                 state_dict = torch.load(checkpoint_path, map_location='cpu')
                 model.load_state_dict(state_dict)
             else:
-                self.status.emit("Warning: No checkpoint found, using random weights")
+                # Auto-download the weight file
+                self.status.emit(f"Checkpoint not found. Auto-downloading {encoder} weights...")
+                success = self.auto_download_weights(encoder)
+                if success:
+                    self.status.emit(f"Loading downloaded checkpoint from {checkpoint_path}...")
+                    state_dict = torch.load(checkpoint_path, map_location='cpu')
+                    model.load_state_dict(state_dict)
+                else:
+                    self.status.emit("Warning: Failed to download weights, using random weights")
             
             # Set device and eval mode
             device = 'cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'
@@ -125,6 +231,42 @@ class DepthEstimationThread(QThread):
         except Exception as e:
             print(f"Error loading Depth Anything V2 model: {e}")
             raise
+    
+    def auto_download_weights(self, model_type):
+        """Auto-download weights for the specified model type"""
+        try:
+            # Model download URLs
+            download_urls = {
+                'vits': 'https://huggingface.co/depth-anything/Depth-Anything-V2-Small/resolve/main/depth_anything_v2_vits.pth?download=true',
+                'vitb': 'https://huggingface.co/depth-anything/Depth-Anything-V2-Base/resolve/main/depth_anything_v2_vitb.pth?download=true',
+                'vitl': 'https://huggingface.co/depth-anything/Depth-Anything-V2-Large/resolve/main/depth_anything_v2_vitl.pth?download=true'
+            }
+            
+            if model_type not in download_urls:
+                return False
+            
+            # Create models directory
+            models_dir = os.path.join(self.workdir, 'models')
+            os.makedirs(models_dir, exist_ok=True)
+            
+            url = download_urls[model_type]
+            filename = f'depth_anything_v2_{model_type}.pth'
+            filepath = os.path.join(models_dir, filename)
+            
+            # Download the file
+            response = requests.get(url, stream=True)
+            response.raise_for_status()
+            
+            with open(filepath, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error auto-downloading weights: {e}")
+            return False
     
     def load_dac_model(self):
         """Load model for camera-aware depth estimation"""
@@ -147,6 +289,16 @@ class DepthEstimationThread(QThread):
             if os.path.exists(checkpoint_path):
                 state_dict = torch.load(checkpoint_path, map_location='cpu')
                 model.load_state_dict(state_dict)
+            else:
+                # Auto-download the weight file
+                self.status.emit(f"Checkpoint not found. Auto-downloading {encoder} weights...")
+                success = self.auto_download_weights(encoder)
+                if success:
+                    self.status.emit(f"Loading downloaded checkpoint from {checkpoint_path}...")
+                    state_dict = torch.load(checkpoint_path, map_location='cpu')
+                    model.load_state_dict(state_dict)
+                else:
+                    self.status.emit("Warning: Failed to download weights, using random weights")
             
             device = 'cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'
             model = model.to(device).eval()
@@ -172,6 +324,9 @@ class DepthEstimationThread(QThread):
             # This method handles all preprocessing internally
             depth_map = self.model.infer_image(image_bgr)
             
+            # Post-process the depth map
+            depth_map = self.post_process_depth(depth_map)
+            
             # The output is already a numpy array in HxW format
             return depth_map
             
@@ -185,11 +340,71 @@ class DepthEstimationThread(QThread):
                 depth_map = np.ones((512, 512), dtype=np.float32)
             return depth_map
     
+    def post_process_depth(self, depth_map):
+        """Post-process depth map for better visualization"""
+        # Remove any invalid values
+        depth_map = np.nan_to_num(depth_map, nan=0.0, posinf=0.0, neginf=0.0)
+        
+        # Get valid depth range
+        valid_depths = depth_map[depth_map > 0]
+        if len(valid_depths) == 0:
+            return depth_map
+        
+        # Use percentile-based clipping to handle outliers
+        min_depth = np.percentile(valid_depths, 1)  # 1st percentile
+        max_depth = np.percentile(valid_depths, 99)  # 99th percentile
+        
+        # Ensure min_depth < max_depth
+        if min_depth >= max_depth:
+            min_depth = np.min(valid_depths)
+            max_depth = np.max(valid_depths)
+            if min_depth >= max_depth:
+                return depth_map
+        
+        # Clip depth map to valid range
+        depth_map = np.clip(depth_map, min_depth, max_depth)
+        
+        # Normalize to 0-1 range for better visualization
+        depth_map = (depth_map - min_depth) / (max_depth - min_depth)
+        
+        return depth_map
+    
     def colorize_depth(self, depth_map):
         """Colorize depth map for visualization"""
-        # Normalize depth to 0-20m range
-        depth_clipped = np.clip(depth_map, 0, 20)
-        depth_normalized = depth_clipped / 20.0
+        # Remove any invalid values
+        depth_map = np.nan_to_num(depth_map, nan=0.0, posinf=0.0, neginf=0.0)
+        
+        # Print debug info for depth range
+        print(f"Depth map stats - min: {np.min(depth_map):.4f}, max: {np.max(depth_map):.4f}, mean: {np.mean(depth_map):.4f}")
+        
+        # Get valid depth range (exclude outliers)
+        valid_depths = depth_map[depth_map > 0]
+        if len(valid_depths) == 0:
+            # If no valid depths, create a uniform depth map
+            depth_normalized = np.ones_like(depth_map) * 0.5
+            print("No valid depths found, using uniform depth map")
+        else:
+            # Use percentile-based normalization to handle outliers
+            min_depth = np.percentile(valid_depths, 1)  # 1st percentile
+            max_depth = np.percentile(valid_depths, 99)  # 99th percentile
+            
+            print(f"Valid depth range - 1st percentile: {min_depth:.4f}, 99th percentile: {max_depth:.4f}")
+            
+            # Ensure min_depth < max_depth
+            if min_depth >= max_depth:
+                min_depth = np.min(valid_depths)
+                max_depth = np.max(valid_depths)
+                print(f"Adjusted range - min: {min_depth:.4f}, max: {max_depth:.4f}")
+                if min_depth >= max_depth:
+                    depth_normalized = np.ones_like(depth_map) * 0.5
+                    print("Still no valid range, using uniform depth map")
+                else:
+                    depth_normalized = (depth_map - min_depth) / (max_depth - min_depth)
+            else:
+                depth_normalized = (depth_map - min_depth) / (max_depth - min_depth)
+            
+            # Clip to valid range
+            depth_normalized = np.clip(depth_normalized, 0, 1)
         
         # Apply matplotlib's turbo colormap
         colormap = cm.get_cmap('turbo')
@@ -213,9 +428,13 @@ class DepthTab(BaseTab):
         self.depth_viewer = None
         self.model_selector = None
         self.estimate_button = None
+        self.download_button = None
         self.progress_bar = None
         self.status_label = None
         self.depth_thread = None
+        self.download_thread = None
+        self.is_estimating = False
+        self.is_downloading = False
     
     def get_tab_name(self):
         return "Depth"
@@ -226,11 +445,18 @@ class DepthTab(BaseTab):
             QMessageBox.warning(self, "Error", "Work directory is not set.")
             return
             
-        main_layout = QVBoxLayout()
+        # Set up basic UI structure like features tab
+        self.setup_basic_ui()
         
-        # Control panel
-        control_panel = self.create_control_panel()
-        main_layout.addWidget(control_panel)
+        # Initialize with data
+        self.initialize_with_data()
+        
+        self.is_initialized = True
+    
+    def setup_basic_ui(self):
+        """Set up the basic UI structure like features tab"""
+        # Create main layout
+        main_layout = QVBoxLayout()
         
         # Progress bar
         self.progress_bar = QProgressBar()
@@ -241,16 +467,73 @@ class DepthTab(BaseTab):
         self.status_label = QLabel("Ready")
         main_layout.addWidget(self.status_label)
         
-        # Main content area
-        splitter = self.create_horizontal_splitter()
+        # Main content area - horizontal splitter like features tab
+        layout = self.create_horizontal_splitter()
         
-        # Left side: Camera and image tree
+        # Left side: Tree of images grouped by camera
         self.camera_image_tree = QTreeWidget()
         self.camera_image_tree.setHeaderLabel("Cameras and Images")
         self.camera_image_tree.setFixedWidth(250)
-        splitter.addWidget(self.camera_image_tree)
+        layout.addWidget(self.camera_image_tree)
         
-        # Middle: Original image viewer
+        # Right side: Depth viewer container with control panel at bottom
+        right_container = QWidget()
+        right_layout = QVBoxLayout(right_container)
+        
+        # Depth viewer area
+        self.depth_viewer_container = QWidget()
+        self.depth_viewer_layout = QVBoxLayout(self.depth_viewer_container)
+        
+        # Add placeholder initially
+        placeholder = QLabel("Select an image to view depth estimation")
+        placeholder.setAlignment(Qt.AlignCenter)
+        placeholder.setStyleSheet("border: 1px solid #ccc; color: #666;")
+        self.depth_viewer_layout.addWidget(placeholder)
+        
+        right_layout.addWidget(self.depth_viewer_container)
+        
+        # Control panel at bottom right
+        control_panel = self.create_control_panel()
+        right_layout.addWidget(control_panel)
+        
+        layout.addWidget(right_container)
+        
+        # Set stretch factors like features tab
+        layout.setStretchFactor(0, 1)  # Left side (image tree)
+        layout.setStretchFactor(1, 4)  # Right side (depth viewer + controls)
+        
+        main_layout.addWidget(layout)
+        self._layout.addLayout(main_layout)
+        
+        # Connect signals
+        self.camera_image_tree.itemClicked.connect(self.on_image_selected)
+    
+    def initialize_with_data(self):
+        """Initialize the depth tab with data"""
+        try:
+            # Remove the placeholder
+            for i in reversed(range(self.depth_viewer_layout.count())):
+                widget = self.depth_viewer_layout.itemAt(i).widget()
+                if widget:
+                    widget.setParent(None)
+            
+            # Create depth viewer widgets
+            self.create_depth_viewer_widgets()
+            
+            # Populate the camera image tree
+            if self.workdir and self.image_list:
+                self.setup_camera_image_tree(self.camera_image_tree, self.on_image_selected)
+            
+        except Exception as e:
+            error_message = f"Failed to initialize depth tab: {str(e)}"
+            QMessageBox.critical(self, "Error", error_message)
+    
+    def create_depth_viewer_widgets(self):
+        """Create depth viewer widgets"""
+        # Create a vertical splitter for original image and depth map
+        depth_splitter = QSplitter(Qt.Vertical)
+        
+        # Original image viewer
         image_container = QWidget()
         image_layout = QVBoxLayout(image_container)
         image_layout.addWidget(QLabel("Original Image"))
@@ -259,9 +542,9 @@ class DepthTab(BaseTab):
         self.image_viewer.setStyleSheet("border: 1px solid #ccc;")
         self.image_viewer.setMinimumSize(400, 300)
         image_layout.addWidget(self.image_viewer)
-        splitter.addWidget(image_container)
+        depth_splitter.addWidget(image_container)
         
-        # Right: Depth map viewer
+        # Depth map viewer
         depth_container = QWidget()
         depth_layout = QVBoxLayout(depth_container)
         depth_layout.addWidget(QLabel("Depth Map"))
@@ -270,22 +553,15 @@ class DepthTab(BaseTab):
         self.depth_viewer.setStyleSheet("border: 1px solid #ccc;")
         self.depth_viewer.setMinimumSize(400, 300)
         depth_layout.addWidget(self.depth_viewer)
-        splitter.addWidget(depth_container)
+        depth_splitter.addWidget(depth_container)
         
-        # Set splitter sizes
-        splitter.setSizes([250, 500, 500])
+        # Set splitter sizes for vertical split
+        depth_splitter.setSizes([300, 300])
         
-        main_layout.addWidget(splitter)
-        self._layout.addLayout(main_layout)
-        
-        # Populate the camera image tree
-        if self.workdir and self.image_list:
-            self.setup_camera_image_tree(self.camera_image_tree, self.on_image_selected)
-            
-        self.is_initialized = True
+        self.depth_viewer_layout.addWidget(depth_splitter)
     
     def create_control_panel(self):
-        """Create the control panel with model selection"""
+        """Create the control panel with model selection and download button"""
         group_box = QGroupBox("Depth Estimation Settings")
         layout = QHBoxLayout()
         
@@ -295,9 +571,14 @@ class DepthTab(BaseTab):
         self.model_selector.addItems(["Depth Anything V2", "DAC (Depth Anything Camera)"])
         layout.addWidget(self.model_selector)
         
-        # Estimate button
+        # Download weights button
+        self.download_button = QPushButton("Download Weights")
+        self.download_button.clicked.connect(self.download_weights)
+        layout.addWidget(self.download_button)
+        
+        # Estimate/Stop button
         self.estimate_button = QPushButton("Estimate Depth for All Images")
-        self.estimate_button.clicked.connect(self.estimate_depth_all)
+        self.estimate_button.clicked.connect(self.toggle_depth_estimation)
         layout.addWidget(self.estimate_button)
         
         # Add stretch
@@ -306,13 +587,128 @@ class DepthTab(BaseTab):
         group_box.setLayout(layout)
         return group_box
     
+    def download_weights(self):
+        """Download model weights"""
+        if not self.workdir:
+            QMessageBox.warning(self, "Warning", "Work directory is not set.")
+            return
+        
+        # If already downloading, stop the download
+        if self.is_downloading:
+            if self.download_thread:
+                self.download_thread.stop()
+            return
+        
+        # Get selected model type based on current selection
+        if self.model_selector.currentIndex() == 0:  # Depth Anything V2
+            # Ask user which size model to download
+            model_dialog = QDialog(self)
+            model_dialog.setWindowTitle("Select Model Size")
+            model_dialog.setModal(True)
+            
+            layout = QVBoxLayout()
+            layout.addWidget(QLabel("Select the model size to download:"))
+            
+            # Radio buttons for model selection
+            small_radio = QRadioButton("Small (vits) - 24.8MB - Fast inference")
+            base_radio = QRadioButton("Base (vitb) - 97.5MB - Balanced")
+            large_radio = QRadioButton("Large (vitl) - 335.3MB - Best quality")
+            
+            # Default to large for Depth Anything V2
+            large_radio.setChecked(True)
+            
+            layout.addWidget(small_radio)
+            layout.addWidget(base_radio)
+            layout.addWidget(large_radio)
+            
+            # Buttons
+            button_layout = QHBoxLayout()
+            ok_button = QPushButton("Download")
+            cancel_button = QPushButton("Cancel")
+            button_layout.addWidget(ok_button)
+            button_layout.addWidget(cancel_button)
+            layout.addLayout(button_layout)
+            
+            model_dialog.setLayout(layout)
+            
+            # Connect buttons
+            ok_button.clicked.connect(model_dialog.accept)
+            cancel_button.clicked.connect(model_dialog.reject)
+            
+            # Show dialog
+            if model_dialog.exec_() != QDialog.Accepted:
+                return
+            
+            # Determine selected model
+            if small_radio.isChecked():
+                model_type = 'vits'
+            elif base_radio.isChecked():
+                model_type = 'vitb'
+            else:
+                model_type = 'vitl'
+                
+        else:  # DAC (Depth Anything Camera)
+            model_type = 'vits'  # Use small model for camera-aware mode
+        
+        # Check if file already exists
+        models_dir = os.path.join(self.workdir, 'models')
+        filename = f'depth_anything_v2_{model_type}.pth'
+        filepath = os.path.join(models_dir, filename)
+        
+        if os.path.exists(filepath):
+            reply = QMessageBox.question(self, "File Exists", 
+                                       f"Weight file {filename} already exists. Do you want to download it again?",
+                                       QMessageBox.Yes | QMessageBox.No)
+            if reply == QMessageBox.No:
+                return
+        
+        # Start download
+        self.is_downloading = True
+        self.download_button.setText("Stop Download")
+        
+        # Disable other controls
+        self.estimate_button.setEnabled(False)
+        self.model_selector.setEnabled(False)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(0)
+        
+        # Create and start download thread
+        self.download_thread = WeightDownloadThread(self.workdir, model_type)
+        self.download_thread.progress.connect(self.update_progress)
+        self.download_thread.status.connect(self.update_status)
+        self.download_thread.error.connect(self.handle_download_error)
+        self.download_thread.finished.connect(self.download_finished)
+        self.download_thread.start()
+    
+    def handle_download_error(self, error_message):
+        """Handle download error"""
+        QMessageBox.critical(self, "Download Error", f"Weight download failed: {error_message}")
+        self.status_label.setText("Download failed")
+    
+    def download_finished(self):
+        """Handle completion of weight download"""
+        # Reset download state
+        self.is_downloading = False
+        self.download_button.setText("Download Weights")
+        
+        # Re-enable controls
+        self.download_button.setEnabled(True)
+        self.estimate_button.setEnabled(True)
+        self.model_selector.setEnabled(True)
+        self.progress_bar.setVisible(False)
+        
+        # Show success message only if not stopped
+        if self.download_thread and not self.download_thread._stop_flag:
+            QMessageBox.information(self, "Success", "Weight download completed successfully!")
+    
     def on_image_selected(self, item, column):
         """Handle image selection from tree"""
-        if item.parent() is None:  # Camera node
-            return
+        if not self.is_initialized:
+            self.initialize()
             
-        image_name = item.text(0)
-        self.display_image_and_depth(image_name)
+        if item.childCount() == 0 and item.parent() is not None:
+            image_name = item.text(0)
+            self.display_image_and_depth(image_name)
     
     def display_image_and_depth(self, image_name):
         """Display original image and its depth map if available"""
@@ -335,18 +731,63 @@ class DepthTab(BaseTab):
         else:
             self.depth_viewer.setText("No depth map available")
     
-    def estimate_depth_all(self):
-        """Estimate depth for all images"""
+    def toggle_depth_estimation(self):
+        """Toggle depth estimation (start/stop)"""
         if not self.workdir or not self.image_list:
             QMessageBox.warning(self, "Warning", "No images available for depth estimation")
+            return
+        
+        # If already estimating, stop the estimation
+        if self.is_estimating:
+            if self.depth_thread:
+                self.depth_thread.stop()
             return
         
         # Get selected model type
         model_type = 'depth_anything_v2' if self.model_selector.currentIndex() == 0 else 'dac'
         
-        # Disable controls
-        self.estimate_button.setEnabled(False)
+        # Check if required weight files exist and offer to download if missing
+        if model_type == 'depth_anything_v2':
+            # Check for any of the available weight files
+            models_dir = os.path.join(self.workdir, 'models')
+            weight_files = [
+                os.path.join(models_dir, 'depth_anything_v2_vits.pth'),
+                os.path.join(models_dir, 'depth_anything_v2_vitb.pth'),
+                os.path.join(models_dir, 'depth_anything_v2_vitl.pth')
+            ]
+            
+            if not any(os.path.exists(f) for f in weight_files):
+                reply = QMessageBox.question(self, "Weights Missing", 
+                                           "No Depth Anything V2 weight files found. Would you like to download them now?",
+                                           QMessageBox.Yes | QMessageBox.No)
+                if reply == QMessageBox.Yes:
+                    self.download_weights()
+                    return
+                else:
+                    QMessageBox.information(self, "Info", "Depth estimation will proceed with random weights (poor quality expected)")
+        
+        elif model_type == 'dac':
+            # Check for vits weight file (used for DAC)
+            models_dir = os.path.join(self.workdir, 'models')
+            weight_file = os.path.join(models_dir, 'depth_anything_v2_vits.pth')
+            
+            if not os.path.exists(weight_file):
+                reply = QMessageBox.question(self, "Weights Missing", 
+                                           "DAC model requires Small (vits) weights. Would you like to download them now?",
+                                           QMessageBox.Yes | QMessageBox.No)
+                if reply == QMessageBox.Yes:
+                    self.download_weights()
+                    return
+                else:
+                    QMessageBox.information(self, "Info", "Depth estimation will proceed with random weights (poor quality expected)")
+        
+        # Start estimation
+        self.is_estimating = True
+        self.estimate_button.setText("Stop Estimation")
+        
+        # Disable other controls
         self.model_selector.setEnabled(False)
+        self.download_button.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
         
@@ -373,9 +814,14 @@ class DepthTab(BaseTab):
     
     def depth_estimation_finished(self):
         """Handle completion of depth estimation"""
+        # Reset estimation state
+        self.is_estimating = False
+        self.estimate_button.setText("Estimate Depth for All Images")
+        
         # Re-enable controls
         self.estimate_button.setEnabled(True)
         self.model_selector.setEnabled(True)
+        self.download_button.setEnabled(True)
         self.progress_bar.setVisible(False)
         
         # Refresh current display
@@ -384,13 +830,13 @@ class DepthTab(BaseTab):
             self.display_image_and_depth(current_item.text(0))
     
     def refresh(self):
-        """Refresh the tab contents"""
-        # Reinitialize the tab if initialized
+        """Refresh the tab content"""
         if self.is_initialized:
             # Remove old widgets
             for i in reversed(range(self._layout.count())): 
                 self._layout.itemAt(i).widget().setParent(None)
             
             # Reinitialize
+            self.setup_basic_ui()
             self.is_initialized = False
             self.initialize()
