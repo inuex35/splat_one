@@ -253,7 +253,7 @@ class ProgressMonitorThread(QThread):
             self.progress.emit(processed_count)
             if processed_count >= self.total_images:
                 break
-            for _ in range(10):  # 0.5秒 = 10 * 0.05秒スリープで逐次 _is_running を確認
+            for _ in range(10):  # 0.5 seconds = 10 * 0.05 second sleep to check _is_running sequentially
                 if not self._is_running:
                     self.stopped.emit()
                     return
@@ -329,13 +329,13 @@ class FeatureExtractor(QWidget):
         self.progress_window = ProgressWindow(total_images)
         self.progress_window.show()
 
-        # 特徴抽出スレッド開始
+        # Start feature extraction thread
         self.feature_thread = FeatureExtractionThread(self.dataset)
         self.feature_thread.finished.connect(self.on_feature_extraction_finished)
         self.feature_thread.error.connect(self.on_feature_extraction_error)
         self.feature_thread.start()
 
-        # 進捗監視スレッド開始
+        # Start progress monitoring thread
         self.monitor_thread = ProgressMonitorThread(self.feature_folder, total_images)
         self.monitor_thread.progress.connect(self.update_progress_window)
         self.monitor_thread.stopped.connect(self.on_feature_extraction_stopped)
@@ -369,7 +369,7 @@ class FeatureExtractor(QWidget):
         self.extract_button.setText("Extract Features")
         self.extract_button.setEnabled(True)
         if self.progress_window:
-            self.progress_window.close()  # Progressウィンドウを閉じる
+            self.progress_window.close()  # Close progress window
             QMessageBox.information(self, "Completed", "Feature extraction completed.")
 
     def on_feature_extraction_error(self, error_message):
@@ -379,7 +379,7 @@ class FeatureExtractor(QWidget):
         self.extract_button.setText("Extract Features")
         self.extract_button.setEnabled(True)
         if self.progress_window:
-            self.progress_window.close()  # Progressウィンドウを閉じる
+            self.progress_window.close()  # Close progress window
             QMessageBox.critical(self, "Error", f"Error:\n{error_message}")
 
     def on_feature_extraction_stopped(self):
