@@ -151,7 +151,7 @@ class DepthEstimationThread(QThread):
                 if not os.path.exists(image_path):
                     continue
                     
-                # Estimate depth
+                # Estimate depth (already includes post-processing)
                 depth_map = self.estimate_depth(image_path)
                 
                 # Check stop flag again after estimation
@@ -159,7 +159,7 @@ class DepthEstimationThread(QThread):
                     self.status.emit("Depth estimation stopped")
                     return
                 
-                # Save depth map
+                # Save processed depth map
                 depth_path = os.path.join(depth_dir, f"{image_name}_depth.npy")
                 np.save(depth_path, depth_map)
                 
@@ -324,6 +324,9 @@ class DepthEstimationThread(QThread):
             # This method handles all preprocessing internally
             depth_map = self.model.infer_image(image_bgr)
             
+            # Post-process the depth map
+            depth_map = self.post_process_depth(depth_map)
+            
             # The output is already a numpy array in HxW format
             return depth_map
             
@@ -337,11 +340,71 @@ class DepthEstimationThread(QThread):
                 depth_map = np.ones((512, 512), dtype=np.float32)
             return depth_map
     
+    def post_process_depth(self, depth_map):
+        """Post-process depth map for better visualization"""
+        # Remove any invalid values
+        depth_map = np.nan_to_num(depth_map, nan=0.0, posinf=0.0, neginf=0.0)
+        
+        # Get valid depth range
+        valid_depths = depth_map[depth_map > 0]
+        if len(valid_depths) == 0:
+            return depth_map
+        
+        # Use percentile-based clipping to handle outliers
+        min_depth = np.percentile(valid_depths, 1)  # 1st percentile
+        max_depth = np.percentile(valid_depths, 99)  # 99th percentile
+        
+        # Ensure min_depth < max_depth
+        if min_depth >= max_depth:
+            min_depth = np.min(valid_depths)
+            max_depth = np.max(valid_depths)
+            if min_depth >= max_depth:
+                return depth_map
+        
+        # Clip depth map to valid range
+        depth_map = np.clip(depth_map, min_depth, max_depth)
+        
+        # Normalize to 0-1 range for better visualization
+        depth_map = (depth_map - min_depth) / (max_depth - min_depth)
+        
+        return depth_map
+    
     def colorize_depth(self, depth_map):
         """Colorize depth map for visualization"""
-        # Normalize depth to 0-20m range
-        depth_clipped = np.clip(depth_map, 0, 20)
-        depth_normalized = depth_clipped / 20.0
+        # Remove any invalid values
+        depth_map = np.nan_to_num(depth_map, nan=0.0, posinf=0.0, neginf=0.0)
+        
+        # Print debug info for depth range
+        print(f"Depth map stats - min: {np.min(depth_map):.4f}, max: {np.max(depth_map):.4f}, mean: {np.mean(depth_map):.4f}")
+        
+        # Get valid depth range (exclude outliers)
+        valid_depths = depth_map[depth_map > 0]
+        if len(valid_depths) == 0:
+            # If no valid depths, create a uniform depth map
+            depth_normalized = np.ones_like(depth_map) * 0.5
+            print("No valid depths found, using uniform depth map")
+        else:
+            # Use percentile-based normalization to handle outliers
+            min_depth = np.percentile(valid_depths, 1)  # 1st percentile
+            max_depth = np.percentile(valid_depths, 99)  # 99th percentile
+            
+            print(f"Valid depth range - 1st percentile: {min_depth:.4f}, 99th percentile: {max_depth:.4f}")
+            
+            # Ensure min_depth < max_depth
+            if min_depth >= max_depth:
+                min_depth = np.min(valid_depths)
+                max_depth = np.max(valid_depths)
+                print(f"Adjusted range - min: {min_depth:.4f}, max: {max_depth:.4f}")
+                if min_depth >= max_depth:
+                    depth_normalized = np.ones_like(depth_map) * 0.5
+                    print("Still no valid range, using uniform depth map")
+                else:
+                    depth_normalized = (depth_map - min_depth) / (max_depth - min_depth)
+            else:
+                depth_normalized = (depth_map - min_depth) / (max_depth - min_depth)
+            
+            # Clip to valid range
+            depth_normalized = np.clip(depth_normalized, 0, 1)
         
         # Apply matplotlib's turbo colormap
         colormap = cm.get_cmap('turbo')
