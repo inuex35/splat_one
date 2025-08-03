@@ -108,11 +108,12 @@ class DepthEstimationThread(QThread):
     error = pyqtSignal(str)
     finished = pyqtSignal()
     
-    def __init__(self, workdir, image_list, model_type='depth_anything_v2'):
+    def __init__(self, workdir, image_list, model_type='depth_anything_v2', model_size='vitl'):
         super().__init__()
         self.workdir = workdir
         self.image_list = image_list
         self.model_type = model_type
+        self.model_size = model_size
         self.model = None
         self.transform = None
         self._stop_flag = False
@@ -200,8 +201,8 @@ class DepthEstimationThread(QThread):
                 'vitg': {'encoder': 'vitg', 'features': 384, 'out_channels': [1536, 1536, 1536, 1536]}
             }
             
-            # Use vitl by default for good balance of quality and speed
-            encoder = 'vitl'
+            # Use selected model size
+            encoder = self.model_size
             
             # Initialize model
             model = DepthAnythingV2(**model_configs[encoder])
@@ -455,6 +456,9 @@ class DepthTab(BaseTab):
         self.initialize_with_data()
         
         self.is_initialized = True
+        
+        # Initialize model type change handler
+        self.on_model_type_changed()
     
     def setup_basic_ui(self):
         """Set up the basic UI structure like features tab"""
@@ -580,26 +584,40 @@ class DepthTab(BaseTab):
     def create_control_panel(self):
         """Create the control panel with model selection and download button"""
         group_box = QGroupBox("Depth Estimation Settings")
-        layout = QHBoxLayout()
+        layout = QVBoxLayout()
         
-        # Model selection
-        layout.addWidget(QLabel("Model:"))
+        # Model selection section
+        model_layout = QHBoxLayout()
+        model_layout.addWidget(QLabel("Model Type:"))
         self.model_selector = QComboBox()
         self.model_selector.addItems(["Depth Anything V2", "DAC (Depth Anything Camera)"])
-        layout.addWidget(self.model_selector)
+        self.model_selector.currentIndexChanged.connect(self.on_model_type_changed)
+        model_layout.addWidget(self.model_selector)
+        layout.addLayout(model_layout)
+        
+        # Model size selection section
+        size_layout = QHBoxLayout()
+        size_layout.addWidget(QLabel("Model Size:"))
+        self.size_selector = QComboBox()
+        self.size_selector.addItems(["Small (vits) - 24.8MB - Fast", "Base (vitb) - 97.5MB - Balanced", "Large (vitl) - 335.3MB - Best"])
+        self.size_selector.setCurrentIndex(2)  # Default to Large
+        size_layout.addWidget(self.size_selector)
+        layout.addLayout(size_layout)
+        
+        # Buttons section
+        button_layout = QHBoxLayout()
         
         # Download weights button
         self.download_button = QPushButton("Download Weights")
         self.download_button.clicked.connect(self.download_weights)
-        layout.addWidget(self.download_button)
+        button_layout.addWidget(self.download_button)
         
         # Estimate/Stop button
         self.estimate_button = QPushButton("Estimate Depth for All Images")
         self.estimate_button.clicked.connect(self.toggle_depth_estimation)
-        layout.addWidget(self.estimate_button)
+        button_layout.addWidget(self.estimate_button)
         
-        # Add stretch
-        layout.addStretch()
+        layout.addLayout(button_layout)
         
         group_box.setLayout(layout)
         return group_box
@@ -616,54 +634,16 @@ class DepthTab(BaseTab):
                 self.download_thread.stop()
             return
         
-        # Get selected model type based on current selection
+        # Get selected model type and size
         if self.model_selector.currentIndex() == 0:  # Depth Anything V2
-            # Ask user which size model to download
-            model_dialog = QDialog(self)
-            model_dialog.setWindowTitle("Select Model Size")
-            model_dialog.setModal(True)
-            
-            layout = QVBoxLayout()
-            layout.addWidget(QLabel("Select the model size to download:"))
-            
-            # Radio buttons for model selection
-            small_radio = QRadioButton("Small (vits) - 24.8MB - Fast inference")
-            base_radio = QRadioButton("Base (vitb) - 97.5MB - Balanced")
-            large_radio = QRadioButton("Large (vitl) - 335.3MB - Best quality")
-            
-            # Default to large for Depth Anything V2
-            large_radio.setChecked(True)
-            
-            layout.addWidget(small_radio)
-            layout.addWidget(base_radio)
-            layout.addWidget(large_radio)
-            
-            # Buttons
-            button_layout = QHBoxLayout()
-            ok_button = QPushButton("Download")
-            cancel_button = QPushButton("Cancel")
-            button_layout.addWidget(ok_button)
-            button_layout.addWidget(cancel_button)
-            layout.addLayout(button_layout)
-            
-            model_dialog.setLayout(layout)
-            
-            # Connect buttons
-            ok_button.clicked.connect(model_dialog.accept)
-            cancel_button.clicked.connect(model_dialog.reject)
-            
-            # Show dialog
-            if model_dialog.exec_() != QDialog.Accepted:
-                return
-            
-            # Determine selected model
-            if small_radio.isChecked():
+            # Get size from size selector
+            size_index = self.size_selector.currentIndex()
+            if size_index == 0:
                 model_type = 'vits'
-            elif base_radio.isChecked():
+            elif size_index == 1:
                 model_type = 'vitb'
             else:
                 model_type = 'vitl'
-                
         else:  # DAC (Depth Anything Camera)
             model_type = 'vits'  # Use small model for camera-aware mode
         
@@ -764,43 +744,34 @@ class DepthTab(BaseTab):
                 self.depth_thread.stop()
             return
         
-        # Get selected model type
-        model_type = 'depth_anything_v2' if self.model_selector.currentIndex() == 0 else 'dac'
+        # Get selected model type and size
+        if self.model_selector.currentIndex() == 0:  # Depth Anything V2
+            model_type = 'depth_anything_v2'
+            # Get size from size selector
+            size_index = self.size_selector.currentIndex()
+            if size_index == 0:
+                model_size = 'vits'
+            elif size_index == 1:
+                model_size = 'vitb'
+            else:
+                model_size = 'vitl'
+        else:  # DAC (Depth Anything Camera)
+            model_type = 'dac'
+            model_size = 'vits'  # DAC only supports small model
         
         # Check if required weight files exist and offer to download if missing
-        if model_type == 'depth_anything_v2':
-            # Check for any of the available weight files
-            models_dir = os.path.join(self.workdir, 'models')
-            weight_files = [
-                os.path.join(models_dir, 'depth_anything_v2_vits.pth'),
-                os.path.join(models_dir, 'depth_anything_v2_vitb.pth'),
-                os.path.join(models_dir, 'depth_anything_v2_vitl.pth')
-            ]
-            
-            if not any(os.path.exists(f) for f in weight_files):
-                reply = QMessageBox.question(self, "Weights Missing", 
-                                           "No Depth Anything V2 weight files found. Would you like to download them now?",
-                                           QMessageBox.Yes | QMessageBox.No)
-                if reply == QMessageBox.Yes:
-                    self.download_weights()
-                    return
-                else:
-                    QMessageBox.information(self, "Info", "Depth estimation will proceed with random weights (poor quality expected)")
+        models_dir = os.path.join(self.workdir, 'models')
+        weight_file = os.path.join(models_dir, f'depth_anything_v2_{model_size}.pth')
         
-        elif model_type == 'dac':
-            # Check for vits weight file (used for DAC)
-            models_dir = os.path.join(self.workdir, 'models')
-            weight_file = os.path.join(models_dir, 'depth_anything_v2_vits.pth')
-            
-            if not os.path.exists(weight_file):
-                reply = QMessageBox.question(self, "Weights Missing", 
-                                           "DAC model requires Small (vits) weights. Would you like to download them now?",
-                                           QMessageBox.Yes | QMessageBox.No)
-                if reply == QMessageBox.Yes:
-                    self.download_weights()
-                    return
-                else:
-                    QMessageBox.information(self, "Info", "Depth estimation will proceed with random weights (poor quality expected)")
+        if not os.path.exists(weight_file):
+            reply = QMessageBox.question(self, "Weights Missing", 
+                                       f"Required weight file 'depth_anything_v2_{model_size}.pth' not found. Would you like to download it now?",
+                                       QMessageBox.Yes | QMessageBox.No)
+            if reply == QMessageBox.Yes:
+                self.download_weights()
+                return
+            else:
+                QMessageBox.information(self, "Info", "Depth estimation will proceed with random weights (poor quality expected)")
         
         # Start estimation
         self.is_estimating = True
@@ -813,7 +784,7 @@ class DepthTab(BaseTab):
         self.progress_bar.setValue(0)
         
         # Create and start depth estimation thread
-        self.depth_thread = DepthEstimationThread(self.workdir, self.image_list, model_type)
+        self.depth_thread = DepthEstimationThread(self.workdir, self.image_list, model_type, model_size)
         self.depth_thread.progress.connect(self.update_progress)
         self.depth_thread.status.connect(self.update_status)
         self.depth_thread.error.connect(self.handle_error)
@@ -854,6 +825,17 @@ class DepthTab(BaseTab):
         if self.point_cloud_viewer:
             self.point_cloud_viewer.set_workdir(self.workdir)
     
+    def on_model_type_changed(self):
+        """Handle model type change"""
+        if self.model_selector.currentIndex() == 0:  # Depth Anything V2
+            # Enable all size options
+            self.size_selector.setEnabled(True)
+            self.size_selector.setCurrentIndex(2)  # Default to Large
+        else:  # DAC (Depth Anything Camera)
+            # DAC only supports small model
+            self.size_selector.setCurrentIndex(0)  # Small
+            self.size_selector.setEnabled(False)
+
     def on_tab_changed(self, index):
         """Handle tab change"""
         if index == 1 and self.point_cloud_viewer is None:  # Point cloud tab selected
